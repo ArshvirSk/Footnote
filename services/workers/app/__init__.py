@@ -1,0 +1,1 @@
+"""Footnote workers app package."""

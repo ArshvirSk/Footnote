@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: footnote
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install API dependencies
+        run: pip install -r services/api/requirements.txt
+
+      - name: Apply auth schema shim
+        run: psql -f infra/docker/init-auth-schema.sql
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: footnote
+
+      - name: Apply migration
+        run: psql -f db/migrations/0001_init.sql
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: footnote
+
+      - name: Lint (ruff)
+        run: ruff check services/ packages/
+
+      - name: Type check (mypy)
+        run: mypy services/api/app/ --config-file pyproject.toml
+        continue-on-error: true  # Strict mode; fix incrementally
+
+      - name: Run tests
+        run: pytest -v
+        env:
+          DATABASE_URL_SYNC: postgresql://postgres:postgres@localhost:5432/footnote
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/footnote
+          REDIS_URL: redis://localhost:6379/0
+          SUPABASE_JWT_SECRET: test-secret
+          PYTHONPATH: .
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend dependencies
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Lint
+        working-directory: apps/web
+        run: npm run lint
+
+      - name: Type check
+        working-directory: apps/web
+        run: npx tsc --noEmit

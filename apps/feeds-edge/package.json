@@ -1,0 +1,15 @@
+{
+  "name": "footnote-feeds-edge",
+  "version": "1.0.0",
+  "description": "Cloudflare worker for realtime AI search indexing",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev src/index.ts",
+    "deploy": "wrangler deploy src/index.ts"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240405.0",
+    "typescript": "^5.4.5",
+    "wrangler": "^3.48.0"
+  }
+}
