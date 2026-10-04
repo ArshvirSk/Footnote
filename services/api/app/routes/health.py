@@ -1,7 +1,6 @@
 """Health check endpoint — no auth required."""
 
 from fastapi import APIRouter
-
 from services.api.app.config import settings
 from services.api.app.schemas import HealthResponse
 

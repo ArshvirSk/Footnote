@@ -4,9 +4,6 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from services.api.app.auth import (
     AuthUser,
     MemberRole,
@@ -16,56 +13,82 @@ from services.api.app.auth import (
 )
 from services.api.app.db import get_db
 from services.api.app.logging import get_logger
-from services.api.app.schemas import ClientCreateRequest, ClientResponse
+from services.api.app.schemas import (
+    ChecklistItemResponse,
+    ClientCreateRequest,
+    ClientResponse,
+    ClientSummaryResponse,
+)
+from services.api.app.website_status import (
+    SETUP_TOTAL,
+    checklist,
+    derive_status,
+    facts_from_row,
+    fetch_client_rows,
+)
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/clients", tags=["clients"])
 
 
-@router.get("", response_model=list[ClientResponse])
+@router.get("", response_model=list[ClientSummaryResponse])
 async def list_clients(
     user: Annotated[
         AuthUser,
         Depends(require_roles(MemberRole.OWNER, MemberRole.ADMIN, MemberRole.STRATEGIST, MemberRole.EDITOR)),
     ],
-    db: AsyncSession = Depends(get_db),
-) -> list[ClientResponse]:
-    """List all clients in the user's organization."""
+    db: Annotated[AsyncSession, Depends(get_db)],
+    include_demo: bool = False,
+) -> list[ClientSummaryResponse]:
+    """List the org's websites with derived status and setup facts.
+
+    Demo/seeded websites are hidden unless ``include_demo=true`` (they are
+    labelled with a "Demo data" badge client-side).
+    """
     if not user.org_id:
         return []
 
-    result = await db.execute(
-        text(
-            "SELECT id, org_id, name, primary_domain, industry, country, "
-            "status, settings, onboarded_at, created_at "
-            "FROM clients WHERE org_id = :oid ORDER BY created_at DESC"
-        ),
-        {"oid": str(user.org_id)},
-    )
-    rows = result.all()
-    return [
-        ClientResponse(
-            id=r.id,
-            org_id=r.org_id,
-            name=r.name,
-            primary_domain=r.primary_domain,
-            industry=r.industry,
-            country=r.country,
-            status=r.status,
-            settings=r.settings if r.settings else {},
-            onboarded_at=r.onboarded_at,
-            created_at=r.created_at,
+    summaries: list[ClientSummaryResponse] = []
+    for row in await fetch_client_rows(db, str(user.org_id), include_demo=include_demo):
+        facts = facts_from_row(row)
+        derived = derive_status(facts, row.status)
+        summaries.append(
+            ClientSummaryResponse(
+                id=row.id,
+                org_id=row.org_id,
+                name=row.name,
+                primary_domain=row.primary_domain,
+                industry=row.industry,
+                country=row.country,
+                status=row.status,
+                settings=row.settings if row.settings else {},
+                onboarded_at=row.onboarded_at,
+                created_at=row.created_at,
+                is_demo=bool(row.is_demo),
+                derived_status=derived,
+                setup_progress=facts.setup_progress,
+                setup_total=SETUP_TOTAL,
+                checklist=[
+                    ChecklistItemResponse(**item) for item in checklist(facts, str(row.id))
+                ],
+                last_collection_at=facts.last_collection_at,
+                visibility_pct=facts.visibility_pct,
+                open_issues=facts.open_issues,
+                pending_approvals=facts.pending_approvals,
+                active_prompts=facts.active_prompts,
+            )
         )
-        for r in rows
-    ]
+    return summaries
 
 
 @router.get("/{client_id}", response_model=ClientResponse)
 async def get_client(
     client_id: UUID,
     user: Annotated[AuthUser, Depends(get_current_user)],
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ClientResponse:
     """Get a single client by ID. Checks access."""
     if not await has_client_access(user, client_id, db):
@@ -74,7 +97,7 @@ async def get_client(
     result = await db.execute(
         text(
             "SELECT id, org_id, name, primary_domain, industry, country, "
-            "status, settings, onboarded_at, created_at "
+            "status, settings, onboarded_at, created_at, is_demo "
             "FROM clients WHERE id = :cid"
         ),
         {"cid": str(client_id)},
@@ -94,6 +117,7 @@ async def get_client(
         settings=row.settings if row.settings else {},
         onboarded_at=row.onboarded_at,
         created_at=row.created_at,
+        is_demo=bool(row.is_demo),
     )
 
 
@@ -104,7 +128,7 @@ async def create_client(
         AuthUser,
         Depends(require_roles(MemberRole.OWNER, MemberRole.ADMIN)),
     ],
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ClientResponse:
     """Create a new client in the user's organization."""
     if not user.org_id:
@@ -146,4 +170,5 @@ async def create_client(
         settings=row.settings if row.settings else {},
         onboarded_at=row.onboarded_at,
         created_at=row.created_at,
+        is_demo=False,
     )

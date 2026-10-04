@@ -6,10 +6,9 @@ import asyncio
 from datetime import date, timedelta
 from typing import Any
 
-from sqlalchemy import text
-
-from services.api.app.logging import get_logger
 from services.api.app.db import engine
+from services.api.app.logging import get_logger
+from sqlalchemy import text
 
 logger = get_logger(__name__)
 
@@ -21,17 +20,17 @@ async def sync_gsc_data(ctx: dict[str, Any]) -> dict[str, str]:
     """Pull clicks and impressions from Google Search Console."""
     logger.info("sync_gsc_started")
     yesterday = date.today() - timedelta(days=1)
-    
+
     async with engine.begin() as conn:
         # Get active GSC integrations
         res = await conn.execute(text("SELECT client_id FROM integrations WHERE provider = 'gsc' AND status = 'active'"))
         clients = res.fetchall()
-        
+
         for (client_id,) in clients:
             # 1. Decrypt token and refresh if needed (mocked)
             # 2. Call Google Search Analytics API
             # 3. Store in gsc_daily and gsc_query_daily
-            
+
             # Mocking the data insertion
             await conn.execute(
                 text("""
@@ -43,13 +42,13 @@ async def sync_gsc_data(ctx: dict[str, Any]) -> dict[str, str]:
                 """),
                 {"cid": client_id, "day": yesterday.isoformat()}
             )
-            
+
             # Update last synced
             await conn.execute(
                 text("UPDATE integrations SET last_synced_at = now() WHERE client_id = :cid AND provider = 'gsc'"),
                 {"cid": client_id}
             )
-            
+
     logger.info("sync_gsc_completed")
     return {"status": "completed"}
 
@@ -58,15 +57,15 @@ async def sync_ga4_data(ctx: dict[str, Any]) -> dict[str, str]:
     """Pull session data and AI referrals from GA4."""
     logger.info("sync_ga4_started")
     yesterday = date.today() - timedelta(days=1)
-    
+
     async with engine.begin() as conn:
         res = await conn.execute(text("SELECT client_id FROM integrations WHERE provider = 'ga4' AND status = 'active'"))
         clients = res.fetchall()
-        
+
         for (client_id,) in clients:
             # 1. Call GA4 Data API filtering by source matching AI_REFERRER_REGEX
             # 2. Store in ga4_daily
-            
+
             await conn.execute(
                 text("""
                     INSERT INTO ga4_daily (client_id, day, source, medium, sessions, engaged_sessions, conversions)
@@ -75,7 +74,7 @@ async def sync_ga4_data(ctx: dict[str, Any]) -> dict[str, str]:
                 """),
                 {"cid": client_id, "day": yesterday.isoformat()}
             )
-            
+
             await conn.execute(
                 text("UPDATE integrations SET last_synced_at = now() WHERE client_id = :cid AND provider = 'ga4'"),
                 {"cid": client_id}

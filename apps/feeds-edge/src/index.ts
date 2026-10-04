@@ -10,6 +10,8 @@ export interface Env {
   API_KEYS: KVNamespace;
   // Footnote backend URL
   BACKEND_URL: string;
+  // Shared service token sent as X-Internal-Service (must match EDGE_SERVICE_TOKEN on the API)
+  SERVICE_TOKEN: string;
 }
 
 export default {
@@ -52,8 +54,8 @@ export default {
         const backendRequest = new Request(backendUrl.toString(), {
           method: "GET",
           headers: {
-            // Forward an internal service token instead of user tokens
-            "X-Internal-Service": "edge-worker",
+            // Service-to-service auth: must match EDGE_SERVICE_TOKEN on the API
+            "X-Internal-Service": env.SERVICE_TOKEN,
           },
         });
 

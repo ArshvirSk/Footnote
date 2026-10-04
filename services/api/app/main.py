@@ -1,15 +1,30 @@
 """FastAPI application entry point."""
 
-from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
-from typing import Any
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from services.api.app.config import settings
-from services.api.app.logging import setup_logging, get_logger
-from services.api.app.routes import health, auth, clients, prompts, integrations, content, edge, billing
+from services.api.app.logging import get_logger, setup_logging
+from services.api.app.routes import (
+    audits,
+    auth,
+    billing,
+    brand,
+    clients,
+    collection,
+    content,
+    edge,
+    entities,
+    gaps,
+    health,
+    integrations,
+    prompts,
+    research,
+    tracking,
+    websites,
+)
 
 logger = get_logger(__name__)
 
@@ -55,7 +70,15 @@ app.include_router(health.router)
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(clients.router, prefix="/api/v1")
 app.include_router(prompts.router, prefix="/api/v1")
+app.include_router(collection.router, prefix="/api/v1")
+app.include_router(research.router, prefix="/api/v1")
+app.include_router(tracking.router, prefix="/api/v1")
 app.include_router(integrations.router, prefix="/api/v1")
 app.include_router(content.router, prefix="/api/v1")
 app.include_router(edge.router, prefix="/api/v1")
 app.include_router(billing.router, prefix="/api/v1")
+app.include_router(gaps.router, prefix="/api/v1")
+app.include_router(audits.router, prefix="/api/v1")
+app.include_router(websites.router, prefix="/api/v1")
+app.include_router(brand.router, prefix="/api/v1")
+app.include_router(entities.router, prefix="/api/v1")

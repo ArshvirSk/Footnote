@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-from uuid import UUID
-
-import pytest
-
-from services.api.app.auth import MemberRole, OPS_ROLES, PORTAL_ROLES
+from services.api.app.auth import OPS_ROLES, PORTAL_ROLES, MemberRole
 
 
 class TestRoleEnums:

@@ -46,7 +46,7 @@ jobs:
         run: pip install -r services/api/requirements.txt
 
       - name: Apply auth schema shim
-        run: psql -f infra/docker/init-auth-schema.sql
+        run: psql -f db/migrations/0000_auth.sql
         env:
           PGHOST: localhost
           PGUSER: postgres

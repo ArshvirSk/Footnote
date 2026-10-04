@@ -1,6 +1,6 @@
 "use client";
 
-import { Key, Shield, HardDrive, Plus } from "lucide-react";
+import { Key, HardDrive } from "lucide-react";
 
 export default function AdminSettingsPage() {
   return (

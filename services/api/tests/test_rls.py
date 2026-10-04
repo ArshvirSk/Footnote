@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import psycopg2
 import pytest
-
 from services.api.tests.conftest import (
     CLIENT_A_ID,
     CLIENT_B_ID,

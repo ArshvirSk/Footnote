@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Check, X, FileText, MessageSquare, Clock } from "lucide-react";
+import { Check, FileText, MessageSquare, Clock } from "lucide-react";
 
 interface ApprovalItem {
   id: string;

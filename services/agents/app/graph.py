@@ -3,10 +3,11 @@
 import asyncio
 from typing import Any
 
+
 async def mock_brief_generator(prompt_id: str, client_id: str) -> dict[str, Any]:
     """
     Mock agent that generates a brief.
-    In Phase 3/4, this will be a LangGraph StateGraph that reads brand profiles, 
+    In Phase 3/4, this will be a LangGraph StateGraph that reads brand profiles,
     SERP data, and constructs an SEO brief.
     """
     print(f"[Agent] Generating brief for prompt {prompt_id}...")

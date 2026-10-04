@@ -1,9 +1,7 @@
 """Worker entry point. Run with: python -m services.workers.app.main"""
 
-import sys
 
 from arq import run_worker
-
 from services.workers.app.worker import WorkerSettings
 
 

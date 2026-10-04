@@ -1,6 +1,6 @@
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["services/api/tests"]
+testpaths = ["services/api/tests", "services/workers/tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -16,6 +16,8 @@ ignore = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"
+mypy_path = "."
+explicit_package_bases = true
 strict = true
 warn_return_any = true
 warn_unused_configs = true

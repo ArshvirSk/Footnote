@@ -7,9 +7,8 @@ from __future__ import annotations
 
 import json
 import os
-import sys
-from datetime import date, datetime, timezone
-from uuid import UUID, uuid4
+from datetime import date
+from uuid import UUID, uuid4, uuid5
 
 import psycopg2
 
@@ -20,6 +19,15 @@ DEMO_CLIENT_ID = UUID("30000000-0000-0000-0000-000000000001")
 DEMO_CLIENT_VIEWER_ID = UUID("20000000-0000-0000-0000-000000000002")
 DEMO_COMPETITOR_ID = UUID("40000000-0000-0000-0000-000000000001")
 DEMO_BATCH_ID = UUID("50000000-0000-0000-0000-000000000001")
+
+# Deterministic id namespace so re-running the seed is idempotent
+# (random uuid4 + ON CONFLICT (id) DO NOTHING would duplicate rows each run).
+_SEED_NS = UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+
+
+def _sid(*parts: object) -> UUID:
+    """Stable UUID5 from the given parts."""
+    return uuid5(_SEED_NS, "|".join(str(p) for p in parts))
 
 
 DEMO_PROMPTS = [
@@ -47,11 +55,17 @@ DEMO_PROMPTS = [
 
 
 def get_connection_string() -> str:
-    """Get the sync connection string for seeding."""
-    return os.environ.get(
-        "DATABASE_URL_SYNC",
-        "postgresql://postgres:postgres@db:5432/footnote",
-    )
+    """Sync DSN: env override first, then the project .env (via pydantic-settings).
+
+    The .env written by the Neon CLI carries DATABASE_URL[_UNPOOLED]; the
+    Settings model normalizes it (sslmode, driver prefix) for psycopg2.
+    """
+    dsn = os.environ.get("DATABASE_URL_SYNC")
+    if dsn:
+        return dsn.replace("postgresql+asyncpg://", "postgresql://")
+    from services.api.app.config import settings
+
+    return settings.database_url_sync
 
 
 def seed() -> None:
@@ -184,7 +198,7 @@ def seed() -> None:
     # ── Prompts (20) ──
     prompt_ids: list[UUID] = []
     for text_val, funnel, intent, source in DEMO_PROMPTS:
-        pid = uuid4()
+        pid = _sid("prompt", DEMO_CLIENT_ID, text_val)
         prompt_ids.append(pid)
         cur.execute(
             """
@@ -216,15 +230,15 @@ def seed() -> None:
     ]
 
     # Create a few answers per prompt for first 5 prompts to make dashboards demoable
-    for i, pid in enumerate(prompt_ids[:5]):
+    for _i, pid in enumerate(prompt_ids[:5]):
         for engine in engines:
             for run_idx in range(1, 4):  # k=3 runs
-                answer_id = uuid4()
+                answer_id = _sid("answer", pid, engine, run_idx, today.isoformat())
                 raw_text = (
-                    f"Based on my analysis, Acme Corp is a strong contender in this space. "
-                    f"According to a recent study, they offer comprehensive features. "
-                    f"RivalTech is another option worth considering. "
-                    f"Sources: acmecorp.com, rivaltech.io, techcrunch.com"
+                    "Based on my analysis, Acme Corp is a strong contender in this space. "
+                    "According to a recent study, they offer comprehensive features. "
+                    "RivalTech is another option worth considering. "
+                    "Sources: acmecorp.com, rivaltech.io, techcrunch.com"
                 )
                 cur.execute(
                     """
@@ -252,7 +266,7 @@ def seed() -> None:
                         ON CONFLICT (id) DO NOTHING
                         """,
                         (
-                            str(uuid4()), str(answer_id), str(DEMO_CLIENT_ID),
+                            str(_sid("cite", answer_id, pos, url)), str(answer_id), str(DEMO_CLIENT_ID),
                             url, title, pos, url.startswith("https://acmecorp"),
                         ),
                     )
@@ -265,7 +279,7 @@ def seed() -> None:
                     VALUES (%s, %s, %s, 'brand', 1, true, true, 'positive')
                     ON CONFLICT (id) DO NOTHING
                     """,
-                    (str(uuid4()), str(answer_id), str(DEMO_CLIENT_ID)),
+                    (str(_sid("mention", answer_id)), str(answer_id), str(DEMO_CLIENT_ID)),
                 )
 
     # ── Seed domains ──
@@ -284,6 +298,25 @@ def seed() -> None:
             ON CONFLICT (domain) DO NOTHING
             """,
             (str(uuid4()), domain_val, dtype),
+        )
+
+    # ── Seed demo gaps (slipped + competitor_cited) ──
+    demo_gaps = [
+        ("slipped", prompt_ids[0], {"day": today.isoformat(), "previous_rank": 3}),
+        ("competitor_cited", prompt_ids[1], {"day": today.isoformat(), "competitor_domain": "rivaltech.io"}),
+        ("slipped", prompt_ids[2], {"day": today.isoformat(), "previous_rank": 5}),
+    ]
+    for gap_type, pid, details in demo_gaps:
+        cur.execute(
+            """
+            INSERT INTO gaps (id, client_id, prompt_id, gap_type, details, status)
+            SELECT %s, %s, %s, %s, %s, 'open'
+            WHERE NOT EXISTS (
+                SELECT 1 FROM gaps WHERE client_id = %s AND prompt_id = %s AND gap_type = %s AND status = 'open'
+            )
+            """,
+            (str(uuid4()), str(DEMO_CLIENT_ID), str(pid), gap_type, json.dumps(details),
+             str(DEMO_CLIENT_ID), str(pid), gap_type),
         )
 
     # ── Seed daily_metrics for last 7 days ──
@@ -318,7 +351,7 @@ def seed() -> None:
     print(f"   User (client viewer): {DEMO_CLIENT_VIEWER_ID} / client@example.com")
     print(f"   Client: {DEMO_CLIENT_ID} / Acme Corp")
     print(f"   Prompts: {len(DEMO_PROMPTS)}")
-    print(f"   Answers: {5 * 4 * 3} (5 prompts × 4 engines × 3 runs)")
+    print(f"   Answers: {5 * 4 * 3} (5 prompts x 4 engines x 3 runs)")
 
 
 if __name__ == "__main__":

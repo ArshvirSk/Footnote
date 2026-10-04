@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, MoreHorizontal, PenTool } from "lucide-react";
+import { MoreHorizontal, PenTool } from "lucide-react";
 
 export default function PipelinePage() {
   const columns = [

@@ -7,16 +7,15 @@ Domain types that cross module boundaries live here.
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-
 # ──── Enums (mirror DB enums) ────
 
 
-class EngineType(str, Enum):
+class EngineType(StrEnum):
     CHATGPT = "chatgpt"
     GEMINI = "gemini"
     PERPLEXITY = "perplexity"
@@ -25,7 +24,7 @@ class EngineType(str, Enum):
     GOOGLE_AIO = "google_aio"
 
 
-class MemberRoleType(str, Enum):
+class MemberRoleType(StrEnum):
     OWNER = "owner"
     ADMIN = "admin"
     STRATEGIST = "strategist"
@@ -34,7 +33,7 @@ class MemberRoleType(str, Enum):
     CLIENT_VIEWER = "client_viewer"
 
 
-class JobStatusType(str, Enum):
+class JobStatusType(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
@@ -71,6 +70,32 @@ class ClientResponse(BaseModel):
     settings: dict[str, object] = Field(default_factory=dict)
     onboarded_at: datetime | None = None
     created_at: datetime
+    is_demo: bool = False
+
+
+class ChecklistItemResponse(BaseModel):
+    """One item of the 7-item website setup checklist."""
+
+    key: str
+    label: str
+    why: str
+    done: bool
+    detail: str
+    href: str
+
+
+class ClientSummaryResponse(ClientResponse):
+    """Client row enriched with derived status and website-list facts."""
+
+    derived_status: str = "onboarding"
+    setup_progress: int = 0
+    setup_total: int = 7
+    checklist: list[ChecklistItemResponse] = Field(default_factory=list)
+    last_collection_at: datetime | None = None
+    visibility_pct: float | None = None
+    open_issues: int = 0
+    pending_approvals: int = 0
+    active_prompts: int = 0
 
 
 class ClientCreateRequest(BaseModel):

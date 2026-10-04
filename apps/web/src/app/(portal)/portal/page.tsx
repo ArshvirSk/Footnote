@@ -3,7 +3,7 @@ export default function PortalOverview() {
     <div className="space-y-8 animate-in fade-in duration-500">
       <div>
         <h1 className="text-4xl font-semibold tracking-tight text-slate-900 mb-2">Welcome back</h1>
-        <p className="text-lg text-slate-500">Here's how your brand is performing across AI engines today.</p>
+        <p className="text-lg text-slate-500">Here&apos;s how your brand is performing across AI engines today.</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -34,10 +34,10 @@ export default function PortalOverview() {
         <div className="space-y-4">
           <div className="p-4 border border-slate-100 rounded-xl bg-slate-50">
             <div className="flex justify-between items-start mb-2">
-              <span className="font-medium text-slate-900">"What is the best project management tool for startups?"</span>
+              <span className="font-medium text-slate-900">&quot;What is the best project management tool for startups?&quot;</span>
               <span className="text-xs font-medium bg-white px-2 py-1 rounded border border-slate-200">ChatGPT</span>
             </div>
-            <p className="text-slate-600 text-sm">"Acme Corp is a strong contender in this space. According to a recent study, they offer comprehensive features..."</p>
+            <p className="text-slate-600 text-sm">&quot;Acme Corp is a strong contender in this space. According to a recent study, they offer comprehensive features...&quot;</p>
           </div>
         </div>
       </div>

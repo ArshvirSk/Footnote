@@ -20,6 +20,7 @@ create table organizations (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   slug text unique not null,
+  stripe_customer_id text unique,               -- Stripe customer id (billing webhook mapping)
   created_at timestamptz not null default now()
 );
 

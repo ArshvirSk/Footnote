@@ -15,3 +15,9 @@ coverage.xml
 *.db
 venv/
 .venv/
+.neon
+
+# Local agent/editor metadata
+.freebuff/
+.agents/
+skills-lock.json

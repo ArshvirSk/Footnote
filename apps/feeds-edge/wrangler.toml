@@ -5,6 +5,8 @@ node_compat = true
 
 [vars]
 BACKEND_URL = "https://api.footnote.dev"
+# Must match EDGE_SERVICE_TOKEN on the API (openssl rand -hex 32); do not commit real values.
+SERVICE_TOKEN = ""
 
 [[kv_namespaces]]
 binding = "API_KEYS"

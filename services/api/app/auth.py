@@ -6,7 +6,8 @@ and provides dependency injection for protected routes.
 
 from __future__ import annotations
 
-from enum import Enum
+from collections.abc import Awaitable, Callable
+from enum import StrEnum
 from typing import Annotated
 from uuid import UUID
 
@@ -14,19 +15,18 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from pydantic import BaseModel
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from services.api.app.config import settings
 from services.api.app.db import get_db
 from services.api.app.logging import get_logger
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = get_logger(__name__)
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
-class MemberRole(str, Enum):
+class MemberRole(StrEnum):
     """Maps to member_role_t in the database."""
 
     OWNER = "owner"
@@ -104,8 +104,8 @@ async def _get_user_context(
 
 async def get_current_user(
     request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)] = None,
-    db: AsyncSession = Depends(get_db),
 ) -> AuthUser:
     """FastAPI dependency: extract and validate the current user from JWT.
 
@@ -128,9 +128,10 @@ async def get_current_user(
     user_id = UUID(sub)
     email = str(payload.get("email", ""))
 
-    # Set the JWT claim for RLS
+    # Set the JWT claim for RLS. set_config(..., is_local=true) == SET LOCAL,
+    # but accepts a bind parameter (SET does not).
     await db.execute(
-        text("SET LOCAL request.jwt.claim.sub = :uid"),
+        text("SELECT set_config('request.jwt.claim.sub', :uid, true)"),
         {"uid": str(user_id)},
     )
 
@@ -145,7 +146,7 @@ async def get_current_user(
     )
 
 
-def require_roles(*roles: MemberRole):
+def require_roles(*roles: MemberRole) -> Callable[..., Awaitable[AuthUser]]:
     """Dependency factory: ensure the user has one of the given roles."""
 
     async def _check(user: Annotated[AuthUser, Depends(get_current_user)]) -> AuthUser:
@@ -159,12 +160,12 @@ def require_roles(*roles: MemberRole):
     return _check
 
 
-def require_ops_role():
+def require_ops_role() -> Callable[..., Awaitable[AuthUser]]:
     """Dependency: user must have an ops-console role."""
     return require_roles(*OPS_ROLES)
 
 
-def require_portal_role():
+def require_portal_role() -> Callable[..., Awaitable[AuthUser]]:
     """Dependency: user must have a portal role."""
     return require_roles(*PORTAL_ROLES)
 

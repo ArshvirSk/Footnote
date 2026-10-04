@@ -1,78 +1,79 @@
-"""Edge search routes for real-time RAG ingestion by external LLMs."""
+"""Edge search route: keyword search over published content for the Feeds edge proxy.
 
-from typing import Annotated
+Service-to-service only: callers must present the shared edge service token.
+The API's DB connection bypasses RLS (superuser), so tenant scoping is enforced
+explicitly here via client_id filters plus the service token check.
+"""
+
+import hmac
+from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
+from services.api.app.config import settings
+from services.api.app.db import get_db
+from services.api.app.logging import get_logger
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.api.app.auth import AuthUser, get_current_user
-from services.api.app.db import get_db
-from services.api.app.logging import get_logger
-
 logger = get_logger(__name__)
 
-# The edge proxy uses internal auth, we skip standard user auth for /edge
-# In production, we'd use a dependency that validates the X-Internal-Service header
-# or an internal JWT minted by the edge worker.
 router = APIRouter(prefix="/clients/{client_id}/edge", tags=["edge"])
 
-async def mock_get_embedding(query: str) -> list[float]:
-    """Mock embedding generation (e.g., text-embedding-3-small)."""
-    # Returns a mock 1536-dimensional vector for pgvector
-    return [0.01] * 1536
+
+async def require_edge_service(
+    x_internal_service: Annotated[str | None, Header()] = None,
+) -> None:
+    """Validate the edge worker's shared service token (service-to-service auth)."""
+    if not settings.edge_service_token:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Edge service token not configured",
+        )
+    if not x_internal_service or not hmac.compare_digest(x_internal_service, settings.edge_service_token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid edge service credentials")
 
 
 @router.get("/search")
 async def edge_search(
     client_id: UUID,
     q: str,
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """
-    Real-time semantic search endpoint for the Feeds Edge Proxy.
-    Returns JSON-LD structured data representing the client's approved content.
-    """
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[None, Depends(require_edge_service)],
+) -> dict[str, Any]:
+    """Keyword search over the client's published content, returned as a JSON-LD graph."""
     if not q:
-        raise HTTPException(status_code=400, detail="Missing query parameter 'q'")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing query parameter 'q'")
 
-    # 1. Embed the query
-    query_vector = await mock_get_embedding(q)
-    vector_str = f"[{','.join(map(str, query_vector))}]"
-    
-    # 2. Similarity search via pgvector (L2 distance `<->`)
-    # We restrict to chunks belonging to active publications for this client
-    search_query = text("""
-        SELECT cc.id, cc.text_content, cc.metadata, 
-               p.target_url, d.title,
-               1 - (cc.embedding <=> :vec) as cosine_similarity
-        FROM content_chunks cc
-        JOIN publications p ON p.id = cc.publication_id
-        JOIN drafts d ON d.id = p.entity_id
-        WHERE cc.client_id = :cid AND p.is_live = true
-        ORDER BY cc.embedding <=> :vec
-        LIMIT 5
-    """)
-    
-    res = await db.execute(search_query, {"cid": str(client_id), "vec": vector_str})
+    pattern = f"%{q}%"
+    res = await db.execute(
+        text(
+            """
+            SELECT cv.title, ci.published_url, cv.body_md
+            FROM content_items ci
+            JOIN content_versions cv ON cv.id = ci.current_version_id
+            WHERE ci.client_id = :cid
+              AND ci.status = 'published'
+              AND ci.published_url IS NOT NULL
+              AND (cv.body_md ILIKE :pat OR cv.title ILIKE :pat)
+            ORDER BY ci.published_at DESC NULLS LAST
+            LIMIT 5
+            """
+        ),
+        {"cid": str(client_id), "pat": pattern},
+    )
     rows = res.fetchall()
-    
-    # 3. Format as JSON-LD for optimal LLM ingestion
-    items = []
-    for row in rows:
-        items.append({
+
+    items = [
+        {
             "@type": "Article",
-            "headline": row.title,
-            "url": row.target_url,
-            "text": row.text_content,
-            "about": row.metadata.get("topics", []) if row.metadata else []
-        })
-        
+            "headline": r.title,
+            "url": r.published_url,
+            "text": (r.body_md or "")[:2000],
+        }
+        for r in rows
+    ]
+
     logger.info("edge_search_executed", client_id=str(client_id), query=q, matches=len(items))
 
-    # JSON-LD Graph wrapping
-    return {
-        "@context": "https://schema.org",
-        "@graph": items
-    }
+    return {"@context": "https://schema.org", "@graph": items}

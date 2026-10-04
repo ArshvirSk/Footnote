@@ -1,14 +1,24 @@
-"""Pytest configuration and shared fixtures for the API test suite."""
+"""Pytest configuration and shared fixtures for the API test suite.
+
+RLS tests must run as a **non-owner** role: table owners bypass row-level
+security, so a connection as the migration user (e.g. Neon's `neondb_owner`)
+would silently see every tenant's rows. The session fixtures therefore:
+
+1. connect as the admin/migration user (from env or .env) to create a dedicated
+   `footnote_test` role and seed tenants, then
+2. hand every test a connection as that role, which RLS actually governs.
+"""
 
 from __future__ import annotations
 
 import os
-from typing import Generator
+from collections.abc import Generator
+from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 from uuid import UUID
 
 import psycopg2
 import pytest
-
 
 # Fixed test UUIDs
 ORG_A_ID = UUID("a0000000-0000-0000-0000-000000000001")
@@ -19,19 +29,68 @@ CLIENT_A_ID = UUID("a0000000-0000-0000-0000-0000000000ca")
 CLIENT_B_ID = UUID("b0000000-0000-0000-0000-0000000000cb")
 CLIENT_VIEWER_ID = UUID("c0000000-0000-0000-0000-00000000000c")
 
+# Non-owner role used by tests; subject to RLS like PostgREST-style access.
+TEST_ROLE = "footnote_test"
+TEST_ROLE_PASSWORD = "footnote_test"
 
-def get_test_dsn() -> str:
-    """Get the test database connection string."""
-    return os.environ.get(
-        "DATABASE_URL_SYNC",
-        "postgresql://postgres:postgres@localhost:5432/footnote",
-    )
+
+def get_admin_dsn() -> str:
+    """Admin/migration DSN (owner): env var first, then project .env, then localhost."""
+    dsn = os.environ.get("DATABASE_URL_SYNC")
+    if not dsn:
+        env_path = Path(__file__).resolve().parents[3] / ".env"
+        values: dict[str, str] = {}
+        if env_path.exists():
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, val = line.split("=", 1)
+                    values[key.strip()] = val.strip().strip('"').strip("'")
+        # Prefer Neon's unpooled (direct) endpoint: session-level state (SET LOCAL)
+        # must survive across statements.
+        dsn = values.get("DATABASE_URL_UNPOOLED") or values.get("DATABASE_URL") or ""
+    if dsn:
+        return dsn.replace("postgresql+asyncpg://", "postgresql://")
+    return "postgresql://postgres:postgres@localhost:5432/footnote"
+
+
+def _role_dsn(admin_dsn: str) -> str:
+    """Same database as admin_dsn but logged in as TEST_ROLE."""
+    parsed = urlparse(admin_dsn)
+    host = parsed.hostname or "localhost"
+    netloc = f"{TEST_ROLE}:{TEST_ROLE_PASSWORD}@{host}"
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    return urlunparse(parsed._replace(netloc=netloc))
 
 
 @pytest.fixture(scope="session")
-def db_conn() -> Generator[psycopg2.extensions.connection, None, None]:
-    """Session-scoped database connection for tests."""
-    conn = psycopg2.connect(get_test_dsn())
+def admin_conn() -> Generator[psycopg2.extensions.connection, None, None]:
+    """Owner connection: ensures the test role + grants exist (idempotent)."""
+    conn = psycopg2.connect(get_admin_dsn())
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (TEST_ROLE,))
+    if cur.fetchone() is None:
+        cur.execute(
+            f'CREATE ROLE {TEST_ROLE} LOGIN PASSWORD %s NOSUPERUSER NOCREATEROLE NOBYPASSRLS',
+            (TEST_ROLE_PASSWORD,),
+        )
+    # Grants so RLS (not bare privileges) is what the tests exercise.
+    cur.execute(f"GRANT USAGE ON SCHEMA public TO {TEST_ROLE}")
+    cur.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {TEST_ROLE}")
+    cur.execute(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {TEST_ROLE}")
+    conn.commit()
+
+    yield conn
+    conn.close()
+
+
+@pytest.fixture(scope="session")
+def db_conn(admin_conn: psycopg2.extensions.connection) -> Generator[psycopg2.extensions.connection, None, None]:
+    """Session-scoped database connection for tests — as the non-owner test role."""
+    conn = psycopg2.connect(_role_dsn(get_admin_dsn()))
     conn.autocommit = False
     yield conn
     conn.close()
@@ -48,11 +107,10 @@ def _reset_rls(db_conn: psycopg2.extensions.connection) -> Generator[None, None,
 
 
 @pytest.fixture(scope="session", autouse=True)
-def seed_test_tenants(db_conn: psycopg2.extensions.connection) -> None:
-    """Create two isolated tenants for cross-tenant RLS testing."""
-    cur = db_conn.cursor()
+def seed_test_tenants(admin_conn: psycopg2.extensions.connection) -> None:
+    """Create two isolated tenants for cross-tenant RLS testing (as owner)."""
+    cur = admin_conn.cursor()
 
-    # Use service role (bypass RLS) for setup
     # Auth users
     for uid, email in [
         (USER_A_ID, "user_a@test.com"),
@@ -113,4 +171,4 @@ def seed_test_tenants(db_conn: psycopg2.extensions.connection) -> None:
             (str(client_id), f"Test prompt for {client_id}"),
         )
 
-    db_conn.commit()
+    admin_conn.commit()

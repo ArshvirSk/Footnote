@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncGenerator
 
+from services.api.app.config import settings
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -9,10 +10,13 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from services.api.app.config import settings
+# TLS: asyncpg rejects `sslmode=` as a connect kwarg (Neon URLs carry it),
+# so Neon connections get SSL via connect_args instead.
+_connect_args: dict[str, object] = {"ssl": True} if "neon.tech" in settings.database_url else {}
 
 engine: AsyncEngine = create_async_engine(
     settings.database_url,
+    connect_args=_connect_args,
     echo=settings.environment == "development",
     pool_size=10,
     max_overflow=20,

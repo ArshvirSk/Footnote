@@ -1,0 +1,328 @@
+[
+  {
+    "id": "g01_positive_leading",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Acme Corp is widely considered the leading platform for this use case. Highly recommended.",
+    "expected_recommended": true,
+    "expected_sentiment": "positive"
+  },
+  {
+    "id": "g02_positive_excellent",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Acme is an excellent choice for most teams that need to move fast.",
+    "expected_recommended": true,
+    "expected_sentiment": "positive"
+  },
+  {
+    "id": "g03_positive_comprehensive",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "For small businesses, Acme Corp offers a comprehensive and reliable service.",
+    "expected_recommended": true,
+    "expected_sentiment": "positive"
+  },
+  {
+    "id": "g04_positive_strong",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Teams consistently rate Acme Corp as a strong and powerful option.",
+    "expected_recommended": true,
+    "expected_sentiment": "positive"
+  },
+  {
+    "id": "g05_positive_ideal",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Acme Corp is ideal for enterprises that need speed.",
+    "expected_recommended": true,
+    "expected_sentiment": "positive"
+  },
+  {
+    "id": "g06_positive_recommend",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "I recommend Acme Corp wholeheartedly.",
+    "expected_recommended": true,
+    "expected_sentiment": "positive"
+  },
+  {
+    "id": "g07_positive_better_than",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Acme Corp is better than Rival for small teams.",
+    "expected_recommended": true,
+    "expected_sentiment": "positive"
+  },
+  {
+    "id": "g08_positive_improved",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Many users say Acme has improved lately.",
+    "expected_recommended": true,
+    "expected_sentiment": "positive"
+  },
+  {
+    "id": "g09_neutral_list",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "You could also look at RivalTech or Acme Corp for this workflow.",
+    "expected_recommended": true,
+    "expected_sentiment": "neutral"
+  },
+  {
+    "id": "g10_neutral_founded",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Acme Corp was founded in 2010 and is headquartered in Berlin.",
+    "expected_recommended": true,
+    "expected_sentiment": "neutral"
+  },
+  {
+    "id": "g11_neutral_report",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Acme Corp publishes an annual report each quarter.",
+    "expected_recommended": true,
+    "expected_sentiment": "neutral"
+  },
+  {
+    "id": "g12_neutral_alongside",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Some teams mention Acme Corp alongside several other vendors.",
+    "expected_recommended": true,
+    "expected_sentiment": "neutral"
+  },
+  {
+    "id": "g13_neutral_operations",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Acme Corp operates in 12 countries.",
+    "expected_recommended": true,
+    "expected_sentiment": "neutral"
+  },
+  {
+    "id": "g14_neutral_possessive",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Acme's new release fixes most issues.",
+    "expected_recommended": true,
+    "expected_sentiment": "neutral"
+  },
+  {
+    "id": "g15_negated_dont_recommend",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "I don't recommend Acme Corp because it lacks scalability.",
+    "expected_recommended": false,
+    "expected_sentiment": "negative"
+  },
+  {
+    "id": "g16_negated_would_not",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "We would not recommend Acme Corp for large teams.",
+    "expected_recommended": false,
+    "expected_sentiment": "negative"
+  },
+  {
+    "id": "g17_negative_does_not_deliver",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Acme Corp does not deliver on its promises.",
+    "expected_recommended": false,
+    "expected_sentiment": "negative"
+  },
+  {
+    "id": "g18_negative_isnt_recommended",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Acme Corp isn't recommended for regulated industries.",
+    "expected_recommended": false,
+    "expected_sentiment": "negative"
+  },
+  {
+    "id": "g19_negative_avoid",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Avoid Acme Corp; there are far better options.",
+    "expected_recommended": false,
+    "expected_sentiment": "negative"
+  },
+  {
+    "id": "g20_negative_recommend_against",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "We recommend against choosing Acme Corp for this workload.",
+    "expected_recommended": false,
+    "expected_sentiment": "negative"
+  },
+  {
+    "id": "g21_negative_lacks",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Acme Corp lacks transparent pricing.",
+    "expected_recommended": false,
+    "expected_sentiment": "negative"
+  },
+  {
+    "id": "g22_negative_expensive_difficult",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Some teams report that Acme Corp is expensive and difficult to set up.",
+    "expected_recommended": false,
+    "expected_sentiment": "negative"
+  },
+  {
+    "id": "g23_negative_overpriced",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Acme Corp is overpriced compared to what you get.",
+    "expected_recommended": false,
+    "expected_sentiment": "negative"
+  },
+  {
+    "id": "g24_negative_slow_unreliable",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Acme Corp's support is slow and unreliable.",
+    "expected_recommended": false,
+    "expected_sentiment": "negative"
+  },
+  {
+    "id": "g25_negative_buggy_limited",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Acme Corp is buggy and limited in scope.",
+    "expected_recommended": false,
+    "expected_sentiment": "negative"
+  },
+  {
+    "id": "g26_mixed_while_prefer_other",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "While some prefer Acme Corp, RivalTech has better features for enterprise.",
+    "expected_recommended": false,
+    "expected_sentiment": "mixed"
+  },
+  {
+    "id": "g27_mixed_prefer_over",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "While both are fine, many teams prefer RivalTech over Acme Corp.",
+    "expected_recommended": false,
+    "expected_sentiment": "mixed"
+  },
+  {
+    "id": "g28_mixed_but_superior",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Acme Corp is solid, but RivalTech is superior for large deployments.",
+    "expected_recommended": false,
+    "expected_sentiment": "mixed"
+  },
+  {
+    "id": "g29_mixed_rather_use",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Although Acme Corp works well, we'd rather use RivalTech.",
+    "expected_recommended": false,
+    "expected_sentiment": "mixed"
+  },
+  {
+    "id": "g30_mixed_reviewers_pick",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Acme Corp has its merits, however most reviewers pick RivalTech.",
+    "expected_recommended": false,
+    "expected_sentiment": "mixed"
+  },
+  {
+    "id": "g31_none_other_tools",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "For project management, the usual suggestions are RivalTech and Basecamp.",
+    "expect_none": true,
+    "expected_recommended": false,
+    "expected_sentiment": "neutral"
+  },
+  {
+    "id": "g32_none_best_list",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "The best tools this year are RivalTech, Nimbus and Forge.",
+    "expect_none": true,
+    "expected_recommended": false,
+    "expected_sentiment": "neutral"
+  },
+  {
+    "id": "g33_none_pricing_generic",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Pricing varies by vendor and contract length.",
+    "expect_none": true,
+    "expected_recommended": false,
+    "expected_sentiment": "neutral"
+  },
+  {
+    "id": "g34_none_professional_advice",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Consult a licensed professional before making decisions.",
+    "expect_none": true,
+    "expected_recommended": false,
+    "expected_sentiment": "neutral"
+  },
+  {
+    "id": "g35_none_market_commentary",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "CRM software has matured considerably.",
+    "expect_none": true,
+    "expected_recommended": false,
+    "expected_sentiment": "neutral"
+  },
+  {
+    "id": "g36_none_other_brand_choice",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "Between these options, RivalTech is the better choice.",
+    "expect_none": true,
+    "expected_recommended": false,
+    "expected_sentiment": "neutral"
+  },
+  {
+    "id": "g37_fuzzy_concatenated_brand",
+    "brand_name": "DBA Consultants",
+    "aliases": ["DBA"],
+    "answer_text": "For enterprise IT work, DBAConsultants is frequently mentioned alongside larger firms.",
+    "expected_recommended": true,
+    "expected_sentiment": "neutral"
+  },
+  {
+    "id": "g38_case_variant_brand",
+    "brand_name": "Acme Corp",
+    "aliases": ["Acme"],
+    "answer_text": "ACME CORP delivers strong results for logistics firms.",
+    "expected_recommended": true,
+    "expected_sentiment": "positive"
+  },
+  {
+    "id": "g39_concatenated_no_alias",
+    "brand_name": "Nimbus Cloud",
+    "aliases": [],
+    "answer_text": "NimbusCloud is reliable and strong.",
+    "expected_recommended": true,
+    "expected_sentiment": "positive"
+  },
+  {
+    "id": "g40_negative_competitor_brand",
+    "brand_name": "RivalCo",
+    "aliases": ["Rival"],
+    "answer_text": "RivalCo lacks integration options, unlike Acme which is more capable.",
+    "expected_recommended": false,
+    "expected_sentiment": "negative"
+  }
+]

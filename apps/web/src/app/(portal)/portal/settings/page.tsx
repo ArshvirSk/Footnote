@@ -1,6 +1,6 @@
 "use client";
 
-import { Key, Copy, Check, RefreshCw } from "lucide-react";
+import { Copy, Check, RefreshCw } from "lucide-react";
 import { useState } from "react";
 
 export default function ClientSettingsPage() {
@@ -15,7 +15,7 @@ export default function ClientSettingsPage() {
     <div className="space-y-8 animate-in fade-in duration-500 max-w-4xl">
       <div>
         <h1 className="text-3xl font-semibold tracking-tight text-slate-900 mb-2">Settings</h1>
-        <p className="text-slate-500">Manage your brand's preferences and realtime data feeds.</p>
+        <p className="text-slate-500">Manage your brand&apos;s preferences and realtime data feeds.</p>
       </div>
 
       <div className="bg-white border border-slate-200 rounded-2xl p-8 shadow-sm">
