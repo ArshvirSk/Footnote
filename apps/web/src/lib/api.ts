@@ -361,6 +361,37 @@ export interface CompetitorMatrixResponse {
   rows: MatrixRow[];
 }
 
+export interface CompetitorPage {
+  url: string;
+  title: string | null;
+  citations: number;
+}
+
+export interface CompetitorPrompt {
+  prompt_id: string;
+  prompt_text: string;
+  hits: number;
+}
+
+export interface CompetitorIntel {
+  competitor_id: string;
+  name: string;
+  domain: string | null;
+  mentions: number;
+  prompts_present: number;
+  citations: number;
+  share_of_voice: number | null;
+  top_pages: CompetitorPage[];
+  gap_prompts: CompetitorPrompt[];
+}
+
+export interface CompetitorIntelligenceResponse {
+  days: number;
+  total_brand_mentions: number;
+  total_competitor_mentions: number;
+  competitors: CompetitorIntel[];
+}
+
 export interface DailyMetric {
   day: string;
   engine: string;
@@ -384,6 +415,45 @@ export interface AuditFinding {
   url: string | null;
   fix_owner: string;
   status: string;
+  suggested_fix: string | null;
+  verified_at: string | null;
+}
+
+export interface AuditRerunResponse {
+  audit: AuditDetail;
+  rerun_of: string;
+  fixed: AuditFinding[];
+  still_present: AuditFinding[];
+  regressed: AuditFinding[];
+  new: AuditFinding[];
+}
+
+export interface DevBriefResponse {
+  filename: string;
+  markdown: string;
+}
+
+/** Effective robots.txt decision for one AI crawler (M3). */
+export interface RobotsBotRule {
+  bot: string;
+  group: string;
+  allowed: boolean;
+  rule: string | null;
+}
+
+/** PageSpeed Insights summary persisted in the audit summary (M3). */
+export interface AuditSpeed {
+  status: "ok" | "not_configured" | "error" | string;
+  strategy?: string;
+  performance_score?: number | null;
+  lcp_ms?: number | null;
+  cls?: number | null;
+  tbt_ms?: number | null;
+  fcp_ms?: number | null;
+  si_ms?: number | null;
+  final_url?: string;
+  fetched_at?: string;
+  reason?: string;
 }
 
 export interface AuditPage {
@@ -402,6 +472,7 @@ export interface Audit {
   finished_at: string | null;
   score: number | null;
   summary: Record<string, unknown>;
+  rerun_of: string | null;
 }
 
 export interface AuditDetail extends Audit {
@@ -493,6 +564,12 @@ export const audits = {
     api.get<AuditDetail>(`/clients/${clientId}/audits/${auditId}`),
   start: (clientId: string, url?: string) =>
     api.post<AuditDetail>(`/clients/${clientId}/audits`, url ? { url } : {}),
+  rerun: (clientId: string, auditId: string) =>
+    api.post<AuditRerunResponse>(`/clients/${clientId}/audits/${auditId}/rerun`),
+  updateFinding: (clientId: string, auditId: string, findingId: string, status: string) =>
+    api.patch<AuditFinding>(`/clients/${clientId}/audits/${auditId}/findings/${findingId}`, { status }),
+  brief: (clientId: string, auditId: string) =>
+    api.get<DevBriefResponse>(`/clients/${clientId}/audits/${auditId}/brief`),
 };
 
 const SELECTED_CLIENT_KEY = "footnote_client_id";
@@ -601,6 +678,10 @@ export const trackingApi = {
     api.get<DomainCitationsResponse>(`/clients/${clientId}/citations/domains?days=${days}`),
   matrix: (clientId: string, days = 7) =>
     api.get<CompetitorMatrixResponse>(`/clients/${clientId}/competitors/matrix?days=${days}`),
+  competitorIntelligence: (clientId: string, days = 7) =>
+    api.get<CompetitorIntelligenceResponse>(
+      `/clients/${clientId}/competitors/intelligence?days=${days}`,
+    ),
   dailyMetrics: (clientId: string, days = 14) =>
     api.get<DailyMetric[]>(`/clients/${clientId}/metrics/daily?days=${days}`),
 };
