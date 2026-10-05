@@ -5,6 +5,7 @@ import { AlertCircle, Check, Link2, TrendingUp } from "lucide-react";
 import {
   getDefaultClientId,
   trackingApi,
+  type CompetitorIntelligenceResponse,
   type CompetitorMatrixResponse,
   type DailyMetric,
   type DomainCitationsResponse,
@@ -198,11 +199,82 @@ function CompetitorMatrix({ matrix }: { matrix: CompetitorMatrixResponse }) {
   );
 }
 
+function CompetitorIntelligence({ data }: { data: CompetitorIntelligenceResponse }) {
+  const [open, setOpen] = useState<string | null>(null);
+  if (data.competitors.length === 0) {
+    return <div className="text-sm text-slate-400">No competitors tracked — add them on the website page first.</div>;
+  }
+  return (
+    <div className="divide-y divide-slate-100">
+      {data.competitors.map((c) => (
+        <div key={c.competitor_id} className="py-3">
+          <button
+            onClick={() => setOpen(open === c.competitor_id ? null : c.competitor_id)}
+            className="w-full flex items-center justify-between gap-4 text-left"
+          >
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-slate-800">
+                {c.name}
+                {c.domain && <span className="ml-2 text-xs font-normal text-slate-400">{c.domain}</span>}
+              </div>
+              <div className="text-xs text-slate-500 mt-0.5">
+                {c.mentions} mentions · {c.citations} citations · appears in {c.prompts_present} prompts
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 w-44">
+              <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-rose-500 rounded-full"
+                  style={{ width: `${Math.min((c.share_of_voice ?? 0) * 100, 100)}%` }}
+                />
+              </div>
+              <span className="text-xs text-slate-500 w-20 text-right">SOV {pct(c.share_of_voice)}</span>
+            </div>
+          </button>
+          {open === c.competitor_id && (
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div>
+                <div className="font-medium text-slate-600 mb-1">Most-cited pages</div>
+                {c.top_pages.length === 0 ? (
+                  <div className="text-slate-400">No citations in this window.</div>
+                ) : (
+                  <ul className="space-y-1">
+                    {c.top_pages.map((p) => (
+                      <li key={p.url} className="text-slate-700 break-all">
+                        {p.title || p.url} <span className="text-slate-400">· {p.citations} citations</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <div className="font-medium text-slate-600 mb-1">Prompts where they show and we don&apos;t</div>
+                {c.gap_prompts.length === 0 ? (
+                  <div className="text-slate-400">No open prompts — brand present wherever they appear.</div>
+                ) : (
+                  <ul className="space-y-1">
+                    {c.gap_prompts.map((p) => (
+                      <li key={p.prompt_id} className="text-slate-700">
+                        “{p.prompt_text}” <span className="text-slate-400">· {p.hits}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function TrackingPage() {
   const [clientId, setClientId] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<DailyMetric[]>([]);
   const [domains, setDomains] = useState<DomainCitationsResponse | null>(null);
   const [matrix, setMatrix] = useState<CompetitorMatrixResponse | null>(null);
+  const [intel, setIntel] = useState<CompetitorIntelligenceResponse | null>(null);
   const [days, setDays] = useState(14);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -211,14 +283,16 @@ export default function TrackingPage() {
     try {
       const client = cid ?? (await getDefaultClientId());
       if (!cid) setClientId(client);
-      const [m, d, mx] = await Promise.all([
+      const [m, d, mx, ci] = await Promise.all([
         trackingApi.dailyMetrics(client, windowDays),
         trackingApi.domains(client, windowDays),
         trackingApi.matrix(client, windowDays),
+        trackingApi.competitorIntelligence(client, windowDays),
       ]);
       setMetrics(m);
       setDomains(d);
       setMatrix(mx);
+      setIntel(ci);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load tracking data");
@@ -326,6 +400,14 @@ export default function TrackingPage() {
           <span className="text-xs text-slate-400">brand visible? which competitors appeared?</span>
         </div>
         {matrix ? <CompetitorMatrix matrix={matrix} /> : <div className="text-sm text-slate-400">Loading…</div>}
+      </section>
+
+      <section className="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-medium text-slate-900">Competitor intelligence</h2>
+          <span className="text-xs text-slate-400">their cited pages, share of voice, and prompts they own</span>
+        </div>
+        {intel ? <CompetitorIntelligence data={intel} /> : <div className="text-sm text-slate-400">Loading…</div>}
       </section>
     </div>
   );
