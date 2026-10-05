@@ -7,8 +7,9 @@ Managed SEO + AEO/GEO platform: track how brands appear in AI answers and Google
 - **Milestone 0 (reality check) — done:** [docs/REALITY_CHECK.md](docs/REALITY_CHECK.md) maps every screen, endpoint, table and worker to real / mock / stubbed, and is updated after each milestone.
 - **Milestone 1 (website setup) — done:** websites list + detail, derived status + setup checklist, brand profile / aliases, brand memory, competitors, personas, dashboard action queue.
 - **Milestone 2 (collection + research) — done:** prompt research agent, live engine adapters, nightly scheduler with idempotency + caps + retries, rules/LLM judge with golden set, collection health, Prompts / Prompt detail / Tracking / Gaps screens.
+- **Milestone 3 (technical audit + competitor intelligence) — done:** per-AI-crawler robots.txt rules, JSON-LD validity + entity drift, mobile PageSpeed (with key), rule re-runs that verify fixes, finding triage, PR-ready dev brief export, and per-competitor page/intelligence panels on Tracking.
 
-**What is not connected yet:** Google Search Console and GA4 (tables untouched, UI shows "Not connected. Planned."), publishing (WordPress/feeds), content generation, portal/admin sections — later milestones. Live collection needs provider API keys; without them runs fail with an explicit `set OPENAI_API_KEY …` error so nothing is ever silently faked. Mock engines exist but are an explicit opt-in (`ALLOW_MOCK_ENGINES=true`), and mock answers are marked (`raw_json.mock=true`, `-mock` model label).
+**What is not connected yet:** Google Search Console and GA4 (tables untouched, UI shows "Not connected. Planned."), publishing (WordPress/feeds), content generation, portal/admin sections — later milestones. Live collection needs provider API keys; without them runs fail with an explicit `set OPENAI_API_KEY …` error so nothing is ever silently faked. Mock engines exist but are an explicit opt-in (`ALLOW_MOCK_ENGINES=true`), and mock answers are marked (`raw_json.mock=true`, `-mock` model label). PageSpeed metrics need `PAGESPEED_API_KEY`; without it audits record an explicit `not_configured` state instead of guessing (the keyless PageSpeed endpoint shares an anonymous quota and returns 429 in practice).
 
 ## Local Setup (no Docker)
 
@@ -74,6 +75,7 @@ See [.env.example](.env.example) for all required variables. Key ones:
 - `ALLOW_MOCK_ENGINES` — explicit opt-in to mock collection for local demos (default `false`)
 - `COLLECTION_JITTER_SECONDS` (default 120) and `DEFAULT_DAILY_CALL_CAP` (default 2000) — scheduler knobs
 - `JUDGE_MODE` (`rules` default, or `llm`) and `JUDGE_MODEL` (default `gpt-5-mini`) — mention judge
+- `PAGESPEED_API_KEY` — optional; enables mobile Lighthouse metrics in site audits (all other audit rules work without it)
 
 ### Running Checks
 
@@ -108,7 +110,7 @@ footnote/
 │  ├─ schemas/        # shared Pydantic/TS types
 │  └─ evals/          # golden sets (judge) + content check fixtures
 ├─ db/
-│  ├─ migrations/     # 0000_auth, 0001_init, 0002_clients_is_demo, 0003_m2_collection (applied by services/api/scripts/migrate.py)
+│  ├─ migrations/     # 0000_auth, 0001_init, 0002_clients_is_demo, 0003_m2_collection, 0004_m3_audit (applied by services/api/scripts/migrate.py)
 │  └─ seed.sql
 └─ docs/              # product docs, reality check, audit reports
 ```
@@ -127,3 +129,12 @@ footnote/
 - **Scheduling:** k=3 runs per prompt × engine per UTC day, jittered fan-out, per-website daily call cap, retries with backoff (429/5xx). Idempotency key `(client, prompt, engine, run_index, day)`; re-running a day is a no-op and manual runs add a new run index instead of overwriting raw answers.
 - **Judging:** deterministic `rules-v2` judge (alias + fuzzy brand/competitor detection, citations, domain taxonomy) by default; optional LLM judge with automatic fallback. The golden set (40 hand-labelled fixtures) gates changes at ≥ 95% agreement per axis.
 - **Outputs:** daily metrics, domain citation ranking, competitor matrix, gaps/slips with raw-answer evidence behind every detection.
+
+### Site audit (Milestone 3)
+
+- **Crawler rules:** status/canonical/title/meta, JSON-LD validity (parse errors, @context/@type, Organization name/`sameAs`) and entity drift against the client's brand aliases, `llms.txt`, sitemap coverage, and `robots.txt` rules resolved per AI crawler (GPTBot, OAI-SearchBot, ChatGPT-User, ClaudeBot, PerplexityBot, Google-Extended + secondary agents) with longest-match-wins semantics.
+- **PageSpeed:** mobile Lighthouse performance/LCP/CLS/TBT with a `PAGESPEED_API_KEY`; otherwise the audit records `not_configured`.
+- **Fix verification:** findings are rule-coded snapshots. **Verify fixes (re-run)** re-crawls, diffs by `(rule, url)` and marks vanished findings `fixed` (`verified_at`, `resolved_in_audit_id`), carrying in-progress/ignored triage onto the new snapshot and flagging regressions.
+- **Dev brief:** `GET /api/v1/clients/{id}/audits/{audit_id}/brief` renders a PR-ready markdown checklist grouped by fix owner (team vs client dev) with suggested fixes, the AI-crawler access table and the PageSpeed summary.
+- **Competitor intelligence:** Tracking shows, per tracked competitor, mentions, citations with the most-cited URLs, share of voice, and the prompts where they appear while the brand is absent.
+- **Demo data:** `services/api/scripts/seed.py` is authoritative — re-running it rebuilds the demo answer set (brand-absent prompt included, so competitor intelligence and gap evidence are non-empty).

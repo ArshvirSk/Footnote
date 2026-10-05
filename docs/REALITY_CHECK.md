@@ -217,3 +217,38 @@ Implemented in this pass; supersedes the M2 rows above.
 **Browser E2E (2026-10-04, DBA + Acme demo)**: DBA prompts page — health empty state, "Find candidates" → 10 template candidates, accept → prompt with `research` badge, run-now → 12 runs scheduled, all failed with "set PERPLEXITY_API_KEY / XAI_API_KEY …" and per-engine 0/3 shown in health; prompt detail showed all 12→16 runs with errors, judge/mock/geo metadata; Acme gaps — 3 open gaps, evidence drawer (why + 12 raw mock answers + citations), open → in_progress → won → reopen (state restored); Acme tracking — visibility 62.9% (352/560), citation share 14.3% (60/420), SOV 60.7%, domain taxonomy table, competitor matrix; DBA tracking empty states render; switcher persistence verified (fixed a bug where demo selections were reset). Console clean (no React errors/warnings).
 
 **Manual setup required for live collection**: add to `.env` (write-protected — edit manually): `OPENAI_API_KEY`, `GEMINI_API_KEY`, `PERPLEXITY_API_KEY`, `XAI_API_KEY` (optional `ANTHROPIC_API_KEY`), then restart the API (no `--reload`). Optional: `ALLOW_MOCK_ENGINES=true` for keyless local runs; Redis or a scheduled runner for nightly batches.
+
+---
+
+## 10. Milestone 3 status update (2026-10-05)
+
+Implemented in this pass; supersedes the M3 rows above.
+
+**Now real**
+
+| Item | What changed |
+| --- | --- |
+| Migration `0004_m3_audit.sql` | `audit_findings.suggested_fix/first_seen_at/last_seen_at/verified_at/resolved_in_audit_id`, `audits.rerun_of` (re-run linkage), rule index. Applied to Neon. Triage statuses: open / in_progress / fixed / ignored. |
+| robots.txt per AI crawler | Groups parsed with repeated-user-agent handling; effective `/` decision uses longest-match-wins and Allow-beats-Disallow ties (RFC 9309). 12 crawlers tracked (GPTBot, OAI-SearchBot, ChatGPT-User, ClaudeBot, PerplexityBot, Google-Extended + CCBot, Bytespider, meta-externalagent, Applebot-Extended, Amazonbot, cohere-ai). Blocked primary bots → `ai_bot_blocked` finding (critical when all are blocked; suppressed under a `Disallow: /` global, which keeps the existing `robots_disallow_all` critical). Per-bot table stored in `audits.summary.robots_rules`. |
+| JSON-LD validity + entity drift | Parse errors (`jsonld_parse_error`, includes raw snippet), missing `@context`/`@type`, Organization completeness (`organization_missing_name`, `organization_missing_sameAs`) and — when brand name/aliases are passed in — `entity_name_mismatch` (entity drift via loose case/punctuation-insensitive matching). Homepage-level in this pass. |
+| PageSpeed Insights | Mobile Lighthouse performance score + LCP/CLS/TBT/FCP/SI via `PAGESPEED_API_KEY`; findings `pagespeed_score_low`, `slow_lcp`, `high_cls` at Lighthouse thresholds. Without a key the summary records `{"status": "not_configured"}`; API failures record `status: error` with the reason (no fake finding). Keyless calls were measured: 429 (`Queries per day` quota for the anonymous consumer), so a key is required. |
+| Rule re-runs (fix verification) | `POST /clients/{id}/audits/{audit_id}/rerun` re-crawls the same site, diffs findings by `(rule, url)` and reports fixed / still present / regressed / new. Vanished findings become `fixed` + `verified_at` + `resolved_in_audit_id`; in-progress/ignored triage carries onto the new snapshot; a previously fixed rule reappearing is a regression (new row stays `open`). `audits.rerun_of` links snapshots; the UI badges re-runs in history. |
+| Finding triage + suggested fixes | `PATCH .../findings/{finding_id}` (open / in_progress / fixed / ignored, 422 otherwise); every rule code has PR-ready remediation text (`SUGGESTED_FIXES`) stored on the finding so exports are deterministic. |
+| Dev brief | `GET .../audits/{audit_id}/brief` → `{filename, markdown}`: score + crawl stats, open/verified/ignored counts, "how to verify" (re-run semantics), AI-crawler access table, PageSpeed summary, checklists grouped by fix owner (team vs client dev) with rule code, detail, URL, suggested fix, plus verified/ignored sections. Frontend downloads it as `.md`. |
+| Competitor intelligence | `GET /clients/{id}/competitors/intelligence?days=` — per competitor: mentions, citations (linked `answer_citations.competitor_id` + `domain_id`), most-cited URLs, share of voice vs the brand, and the prompts where they appear while the brand is absent (gap briefs). Tracking page renders expandable competitor cards. |
+| Demo seed | `services/api/scripts/seed.py` is now authoritative over the demo answer set: re-running deletes and rebuilds the fixtures (60 answers / 5 prompts x 4 engines x 3 runs), one prompt has brand-absent answers where only RivalTech is mentioned/cited, citations carry `domain_id`/`competitor_id`, and competitor mentions exist alongside brand mentions elsewhere. Emoji prints replaced (cp1252 crash on Windows — the script could not run at all). |
+| Screens | Site Audit: AI-crawler access table, PageSpeed tiles (explicit not-configured / predates-audit states), findings with status chips + owner + suggested fix + Start/Ignore/Reopen, **Verify fixes (re-run)** with diff banner, **Dev brief** download. Tracking: competitor intelligence cards with most-cited pages and gap prompts. Audit API responses gained `suggested_fix`, `verified_at`, `rerun_of`. |
+
+**Still stubbed / not yet real (M3 scope)**
+
+- Crawl is still synchronous HTTP (stdlib HTMLParser); JS-rendered pages, screenshots and crawl progress are not implemented (Playwright remains the later plan).
+- JSON-LD validity/entity drift runs on the homepage only; sampled pages feed the site-wide description aggregate.
+- Dev brief is generated on demand (not persisted as a record), and competitor gap prompts are display-only — turning them into content briefs is M4.
+- PageSpeed needs `PAGESPEED_API_KEY`; audit runs are ~15-25s per crawl and PSI adds up to ~45s (bounded per request).
+- DBA's score moved 91 → 88 because the new Organization `sameAs` rule fires on its current JSON-LD — the old score is not comparable across rule versions until re-run.
+
+**Battery after Milestone 3** (all exit 0): `ruff` 0 · `mypy --strict` 0/64 · `pytest` **129 passed** (12 new audit-engine tests + 8 new M3 route tests) · judge eval **100% (40/40)** · `tsc --noEmit` 0 · eslint 0 errors (1 pre-existing warning) · `next build` ✓ (18 routes).
+
+**Live verification (2026-10-05)**: MDN re-audit 78/100 (unchanged by the new rules); DBA 88/100 with real `organization_missing_sameAs`; per-bot parsing matched reality on reddit.com/robots.txt (all 12 tracked bots blocked) and nytimes.com (all blocked except Amazonbot). Browser E2E on DBA: old audit showed "predates … re-run to populate", **Verify fixes (re-run)** produced a real diff (3 still present, 1 new = `organization_missing_sameAs`) with the 12-bot table populated and PageSpeed "Not configured", triage Start → IN PROGRESS → Reopen restored, dev brief downloaded (`dev-brief-dba-20261005.md`, correct sections). Acme Tracking: RivalTech 28 mentions / 60 citations / 5 prompts / SOV 36.8%, most-cited page `rivaltech.io/pricing` (60), gap prompt "How to choose a CRM for small business?" (24 hits) after re-seeding.
+
+**Manual setup for PageSpeed** (optional): add `PAGESPEED_API_KEY` to `.env` and restart the API; no other M3 feature needs a key.
