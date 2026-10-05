@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import date
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4, uuid5
 
 import psycopg2
@@ -74,7 +75,7 @@ def seed() -> None:
     conn.autocommit = True
     cur = conn.cursor()
 
-    print("🌱 Seeding Footnote database...")
+    print("Seeding Footnote database...")
 
     # ── Auth user (simulated) ──
     cur.execute(
@@ -209,7 +210,35 @@ def seed() -> None:
             (str(pid), str(DEMO_CLIENT_ID), text_val, funnel, intent, source),
         )
 
+    # ── Seed domains (before citations so they can link domain_id/competitor_id) ──
+    domains = [
+        ("acmecorp.com", "owned"),
+        ("rivaltech.io", "competitor"),
+        ("techcrunch.com", "news"),
+        ("reddit.com", "forum"),
+        ("g2.com", "review_site"),
+    ]
+    for domain_val, dtype in domains:
+        cur.execute(
+            """
+            INSERT INTO domains (id, domain, domain_type)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (domain) DO NOTHING
+            """,
+            (str(uuid4()), domain_val, dtype),
+        )
+    cur.execute(
+        "SELECT domain, id FROM domains WHERE domain = ANY(%s)",
+        ([d for d, _t in domains],),
+    )
+    domain_ids: dict[str, str] = {row[0]: str(row[1]) for row in cur.fetchall()}
+
     # ── Collection batch + fixture answers ──
+    # The seed owns the demo answer set: clear previous fixture answers (cascade
+    # removes their citations/mentions) so re-runs converge on this fixture
+    # instead of accumulating rows from older seeding variants.
+    cur.execute("DELETE FROM answers WHERE client_id = %s", (str(DEMO_CLIENT_ID),))
+
     today = date.today()
     cur.execute(
         """
@@ -229,23 +258,37 @@ def seed() -> None:
         ("https://g2.com/categories/crm", "G2 CRM Reviews"),
     ]
 
-    # Create a few answers per prompt for first 5 prompts to make dashboards demoable
+    # Create a few answers per prompt for first 5 prompts to make dashboards demoable.
+    # Prompt #2 (the demo competitor_cited gap) gets brand-absent answers where only
+    # RivalTech is mentioned/cited, so competitor intelligence + gap briefs have
+    # real evidence; the other prompts include both brands (one RivalTech mention
+    # per engine) so the matrix and share-of-voice are non-empty.
     for _i, pid in enumerate(prompt_ids[:5]):
+        brand_absent = _i == 1
         for engine in engines:
             for run_idx in range(1, 4):  # k=3 runs
                 answer_id = _sid("answer", pid, engine, run_idx, today.isoformat())
-                raw_text = (
-                    "Based on my analysis, Acme Corp is a strong contender in this space. "
-                    "According to a recent study, they offer comprehensive features. "
-                    "RivalTech is another option worth considering. "
-                    "Sources: acmecorp.com, rivaltech.io, techcrunch.com"
-                )
+                if brand_absent:
+                    raw_text = (
+                        "RivalTech is the strongest option here, especially for teams that need "
+                        "advanced automation. Sources: rivaltech.io, techcrunch.com"
+                    )
+                    citations = fixture_citations[1:3]
+                else:
+                    raw_text = (
+                        "Based on my analysis, Acme Corp is a strong contender in this space. "
+                        "According to a recent study, they offer comprehensive features. "
+                        "RivalTech is another option worth considering. "
+                        "Sources: acmecorp.com, rivaltech.io, techcrunch.com"
+                    )
+                    citations = fixture_citations[:3]
                 cur.execute(
                     """
                     INSERT INTO answers (id, batch_id, client_id, prompt_id, engine, mode,
                         run_index, status, raw_text, raw_json, model_label, collected_at, parsed_at)
                     VALUES (%s, %s, %s, %s, %s, 'api', %s, 'succeeded', %s, %s, %s, now(), now())
-                    ON CONFLICT (id) DO NOTHING
+                    ON CONFLICT (id) DO UPDATE SET raw_text = EXCLUDED.raw_text,
+                        raw_json = EXCLUDED.raw_json
                     """,
                     (
                         str(answer_id), str(DEMO_BATCH_ID), str(DEMO_CLIENT_ID),
@@ -256,49 +299,61 @@ def seed() -> None:
                     ),
                 )
 
-                # Add fixture citations
-                for pos, (url, title) in enumerate(fixture_citations[:3], 1):
+                # Rebuild derived rows so re-seeding converges on the current
+                # fixture definition (old runs may have had different citations).
+                cur.execute("DELETE FROM answer_citations WHERE answer_id = %s", (str(answer_id),))
+                cur.execute("DELETE FROM brand_mentions WHERE answer_id = %s", (str(answer_id),))
+
+                # Add fixture citations, linked to the domain taxonomy (and to the
+                # competitor when the URL is theirs).
+                for pos, (url, title) in enumerate(citations, 1):
+                    url_domain = urlsplit(url).netloc.removeprefix("www.")
+                    competitor_id = str(DEMO_COMPETITOR_ID) if url_domain == "rivaltech.io" else None
                     cur.execute(
                         """
-                        INSERT INTO answer_citations (id, answer_id, client_id, url, title, position,
-                            is_brand_owned)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (id) DO NOTHING
+                        INSERT INTO answer_citations (id, answer_id, client_id, url, title, domain_id,
+                            position, is_brand_owned, competitor_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (id) DO UPDATE SET domain_id = EXCLUDED.domain_id,
+                            competitor_id = EXCLUDED.competitor_id,
+                            is_brand_owned = EXCLUDED.is_brand_owned
                         """,
                         (
                             str(_sid("cite", answer_id, pos, url)), str(answer_id), str(DEMO_CLIENT_ID),
-                            url, title, pos, url.startswith("https://acmecorp"),
+                            url, title, domain_ids.get(url_domain), pos,
+                            url.startswith("https://acmecorp"), competitor_id,
                         ),
                     )
 
-                # Add brand mention
-                cur.execute(
-                    """
-                    INSERT INTO brand_mentions (id, answer_id, client_id, entity_kind,
-                        rank_in_answer, linked, recommended, sentiment)
-                    VALUES (%s, %s, %s, 'brand', 1, true, true, 'positive')
-                    ON CONFLICT (id) DO NOTHING
-                    """,
-                    (str(_sid("mention", answer_id)), str(answer_id), str(DEMO_CLIENT_ID)),
-                )
+                # Brand mention (absent on the competitor_cited demo prompt).
+                if not brand_absent:
+                    cur.execute(
+                        """
+                        INSERT INTO brand_mentions (id, answer_id, client_id, entity_kind,
+                            rank_in_answer, linked, recommended, sentiment)
+                        VALUES (%s, %s, %s, 'brand', 1, true, true, 'positive')
+                        ON CONFLICT (id) DO NOTHING
+                        """,
+                        (str(_sid("mention", answer_id)), str(answer_id), str(DEMO_CLIENT_ID)),
+                    )
 
-    # ── Seed domains ──
-    domains = [
-        ("acmecorp.com", "owned"),
-        ("rivaltech.io", "competitor"),
-        ("techcrunch.com", "news"),
-        ("reddit.com", "forum"),
-        ("g2.com", "review_site"),
-    ]
-    for domain_val, dtype in domains:
-        cur.execute(
-            """
-            INSERT INTO domains (id, domain, domain_type)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (domain) DO NOTHING
-            """,
-            (str(uuid4()), domain_val, dtype),
-        )
+                # Competitor mentions: every run on the brand-absent prompt, one per
+                # engine elsewhere (so share of voice has a denominator).
+                if brand_absent or run_idx == 1:
+                    cur.execute(
+                        """
+                        INSERT INTO brand_mentions (id, answer_id, client_id, entity_kind, competitor_id,
+                            rank_in_answer, linked, recommended, sentiment, excerpt)
+                        VALUES (%s, %s, %s, 'competitor', %s, %s, false, %s, 'neutral', %s)
+                        ON CONFLICT (id) DO UPDATE SET competitor_id = EXCLUDED.competitor_id
+                        """,
+                        (
+                            str(_sid("comp-mention", answer_id)), str(answer_id), str(DEMO_CLIENT_ID),
+                            str(DEMO_COMPETITOR_ID), 1 if brand_absent else 2,
+                            brand_absent, "RivalTech is the strongest option here" if brand_absent
+                            else "RivalTech is another option worth considering",
+                        ),
+                    )
 
     # ── Seed demo gaps (slipped + competitor_cited) ──
     demo_gaps = [
@@ -345,7 +400,7 @@ def seed() -> None:
 
     cur.close()
     conn.close()
-    print("✅ Seed complete!")
+    print("Seed complete!")
     print(f"   Org: {DEMO_ORG_ID}")
     print(f"   User (operator): {DEMO_USER_ID} / operator@footnote.dev")
     print(f"   User (client viewer): {DEMO_CLIENT_VIEWER_ID} / client@example.com")
