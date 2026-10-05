@@ -6,6 +6,21 @@ in the categories declared by ``audit_findings.category``:
 
     schema | meta | robots | llms_txt | sitemap | speed | entity
 
+Milestone 3 additions:
+
+- **robots.txt rules per AI crawler** (GPTBot, OAI-SearchBot, ChatGPT-User,
+  ClaudeBot, PerplexityBot, Google-Extended, plus secondary agents): groups are
+  parsed, matched against ``/`` with longest-match-wins semantics, and recorded
+  per bot in ``summary["robots_rules"]``.
+- **JSON-LD validity** (parse errors, missing @context/@type, Organization
+  completeness, ``sameAs``) and **entity drift** against the client's brand
+  name/aliases when ``entity_names`` is supplied.
+- **PageSpeed Insights** (mobile Lighthouse scores for the homepage) when a
+  ``pagespeed_key`` is provided; without one the summary records an explicit
+  ``{"status": "not_configured"}`` instead of guessing.
+- Every finding carries a `suggested_fix` (rule -> remediation text) so the
+  dev brief export is deterministic.
+
 Findings are scored (100 minus severity-weighted deductions, floored at 0)
 and persisted into ``audits`` / ``audit_findings`` / ``site_pages`` by the
 routes that call :func:`run_site_audit`.
@@ -19,6 +34,7 @@ import json
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from html.parser import HTMLParser
 from typing import Any, ClassVar
 from urllib.parse import urlsplit
@@ -34,6 +50,69 @@ _SEVERITY_PENALTY = {"critical": 30, "high": 15, "medium": 7, "low": 3}
 # Cap sitemap-derived page fetches so one audit can't crawl an unbounded site.
 MAX_PAGES = 20
 FETCH_TIMEOUT = 15.0
+PAGESPEED_TIMEOUT = 45.0
+PAGESPEED_ENDPOINT = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
+
+# ── AI crawlers ──────────────────────────────────────────────────────────────
+# Primary agents decide whether answer engines can read and cite the site.
+PRIMARY_AI_BOTS: tuple[str, ...] = (
+    "GPTBot",
+    "OAI-SearchBot",
+    "ChatGPT-User",
+    "ClaudeBot",
+    "PerplexityBot",
+    "Google-Extended",
+)
+# Secondary agents: relevant for training/model pipelines that surface brands.
+SECONDARY_AI_BOTS: tuple[str, ...] = (
+    "CCBot",
+    "Bytespider",
+    "meta-externalagent",
+    "Applebot-Extended",
+    "Amazonbot",
+    "cohere-ai",
+)
+
+# ── Suggested fixes (rule -> PR-ready remediation text for the dev brief) ────
+SUGGESTED_FIXES: dict[str, str] = {
+    "missing_title": "Add a unique <title> (50-60 chars) naming the entity and the primary service.",
+    "title_too_long": "Trim the <title> to ≤65 characters; put the brand name last.",
+    "missing_description": "Add a 140-165 char meta description with the offer, audience and a proof point.",
+    "description_too_long": "Trim the meta description to ≤165 characters so engines don't truncate it.",
+    "missing_canonical": "Add <link rel=\"canonical\" href=\"…\"> pointing at the preferred absolute URL.",
+    "missing_og_title": "Add og:title and og:description so shares and AI previews render correctly.",
+    "missing_lang_attr": "Set lang on the <html> element (e.g. <html lang=\"en\">).",
+    "missing_json_ld": "Add JSON-LD (Organization at minimum) describing the entity, services and sameAs profiles.",
+    "missing_org_schema": "Add an Organization/LocalBusiness JSON-LD node with name, url, logo and contactPoint.",
+    "missing_faq_schema": "Add FAQPage or HowTo JSON-LD for the questions this page answers.",
+    "missing_h1": "Add exactly one <h1> that states the entity and the page topic.",
+    "multiple_h1": "Keep one <h1> per page; demote the rest to <h2>/<h3>.",
+    "thin_content": "Expand to at least 250 words of answer-first content with concrete claims and sources.",
+    "slow_response": "Investigate server response time / TTFB; aim under 1.5s from the audited region.",
+    "unreachable_homepage": "Fix the homepage — it must return HTTP 200 to be crawlable at all.",
+    "missing_robots": "Publish /robots.txt with User-agent groups and a Sitemap directive.",
+    "robots_disallow_all": "Remove the site-wide Disallow: / (or scope it to staging paths only).",
+    "robots_missing_sitemap": "Add a Sitemap: line to robots.txt pointing at the XML sitemap.",
+    "ai_bot_blocked": "Unblock the named AI crawlers with an explicit Allow block in robots.txt.",
+    "missing_sitemap": "Publish /sitemap.xml listing canonical pages with lastmod dates.",
+    "empty_sitemap": "Populate the sitemap with <loc> entries for every canonical page.",
+    "site_wide_missing_descriptions": "Add unique meta descriptions across page templates.",
+    "missing_llms_txt": "Add /llms.txt summarising the entity, key pages and canonical answers for LLMs.",
+    "pagespeed_score_low": "Work through the Lighthouse opportunities in the PageSpeed report (images, JS, fonts).",
+    "slow_lcp": "Improve LCP: compress/right-size the hero image, preload it, and reduce render-blocking JS/CSS.",
+    "high_cls": "Reserve space for images/ads/embeds (width/height, aspect-ratio) to stop layout shift.",
+    "jsonld_parse_error": "Fix the JSON syntax inside the application/ld+json block — engines discard invalid JSON-LD.",
+    "jsonld_missing_context": "Add \"@context\": \"https://schema.org\" to the JSON-LD root.",
+    "jsonld_missing_type": "Give every JSON-LD node an \"@type\" so engines can interpret it.",
+    "organization_missing_name": "Add the legal/trading name to the Organization JSON-LD node.",
+    "organization_missing_sameAs": "Add sameAs URLs (LinkedIn, Crunchbase, Wikipedia…) so engines disambiguate the entity.",
+    "entity_name_mismatch": "Align the Organization JSON-LD name with the brand name used on the site and profiles.",
+}
+
+
+def suggested_fix(rule: str) -> str:
+    """PR-ready remediation text for a rule code (empty when unknown)."""
+    return SUGGESTED_FIXES.get(rule, "")
 
 
 @dataclass
@@ -180,6 +259,227 @@ def _extract_schema_types(jsonld: list[Any]) -> set[str]:
     return types
 
 
+# ── robots.txt parsing (FR-16) ────────────────────────────────────────────────
+
+
+@dataclass
+class RobotsGroup:
+    """One robots.txt user-agent group: agents plus their allow/disallow rules."""
+
+    agents: list[str]
+    rules: list[tuple[str, str]]  # (directive, path) with directive allow|disallow
+
+
+@dataclass
+class RobotsBotRule:
+    """Effective decision for one AI crawler against path ``/``."""
+
+    bot: str
+    group: str  # matched user-agent (bot name or "*"), "none" when no group
+    allowed: bool
+    rule: str | None  # matched rule text, e.g. "Disallow: /blog"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"bot": self.bot, "group": self.group, "allowed": self.allowed, "rule": self.rule}
+
+
+def parse_robots(text: str) -> list[RobotsGroup]:
+    """Parse robots.txt into user-agent groups (comments/blanks ignored)."""
+    groups: list[RobotsGroup] = []
+    current: RobotsGroup | None = None
+    for raw_line in text.splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line or ":" not in line:
+            continue
+        directive, _, value = line.partition(":")
+        directive = directive.strip().lower()
+        value = value.strip()
+        if directive == "user-agent":
+            if current is None or current.rules:
+                # A new user-agent line after rules starts a new group; repeated
+                # user-agent lines before any rule extend the current group.
+                current = RobotsGroup(agents=[], rules=[])
+                groups.append(current)
+            current.agents.append(value)
+        elif directive in ("allow", "disallow") and current is not None:
+            current.rules.append((directive, value))
+    return groups
+
+
+def _group_for_bot(groups: list[RobotsGroup], bot: str) -> tuple[RobotsGroup | None, str]:
+    """Exact (case-insensitive) agent match wins; then the ``*`` group."""
+    for group in groups:
+        if any(agent.lower() == bot.lower() for agent in group.agents):
+            return group, bot
+    for group in groups:
+        if any(agent.strip() == "*" for agent in group.agents):
+            return group, "*"
+    return None, "none"
+
+
+def _pattern_matches(path: str, pattern: str) -> bool:
+    """robots.txt path pattern match (``*`` wildcard, ``$`` end anchor)."""
+    if not pattern:
+        return False
+    anchored = pattern.endswith("$")
+    body = pattern[:-1] if anchored else pattern
+    regex = "^" + re.escape(body).replace(r"\*", ".*") + ("$" if anchored else "")
+    return re.match(regex, path, re.IGNORECASE) is not None
+
+
+def _effective_rule(group: RobotsGroup | None, path: str = "/") -> tuple[bool, str | None]:
+    """Longest match wins; on equal length Allow beats Disallow (RFC 9309)."""
+    if group is None or not group.rules:
+        return True, None
+    matches: list[tuple[int, str, str]] = []
+    for directive, pattern in group.rules:
+        if _pattern_matches(path, pattern):
+            matches.append((len(pattern.rstrip("$")), directive, pattern))
+    if not matches:
+        return True, None
+    longest = max(length for length, _d, _p in matches)
+    top = [(d, p) for length, d, p in matches if length == longest]
+    for directive, pattern in top:
+        if directive == "allow":
+            return True, f"Allow: {pattern}"
+    directive, pattern = top[0]
+    return False, f"Disallow: {pattern}"
+
+
+def effective_bot_rules(groups: list[RobotsGroup]) -> list[RobotsBotRule]:
+    """Effective ``/`` decision for every tracked AI crawler."""
+    rules: list[RobotsBotRule] = []
+    for bot in (*PRIMARY_AI_BOTS, *SECONDARY_AI_BOTS):
+        group, matched = _group_for_bot(groups, bot)
+        allowed, rule = _effective_rule(group)
+        rules.append(RobotsBotRule(bot=bot, group=matched, allowed=allowed, rule=rule))
+    return rules
+
+
+def _audit_robots(
+    base: str,
+    robots_status: int | None,
+    robots_text: str,
+    findings: list[Finding],
+) -> list[dict[str, Any]]:
+    """robots.txt: reachability, site-wide blocks and per-AI-bot rules."""
+    if robots_status != 200:
+        findings.append(Finding("robots", "high", "missing_robots", "robots.txt missing or unreachable", f"{base}/robots.txt"))
+        return []
+
+    groups = parse_robots(robots_text)
+    # The `*` group decides for everyone without a specific group.
+    global_group, _ = _group_for_bot(groups, "__none__")
+    global_allowed, _ = _effective_rule(global_group)
+    if not global_allowed:
+        findings.append(Finding("robots", "critical", "robots_disallow_all", "robots.txt disallows all crawlers", f"{base}/robots.txt"))
+    else:
+        bot_rules = effective_bot_rules(groups)
+        blocked = [r for r in bot_rules if r.bot in PRIMARY_AI_BOTS and not r.allowed]
+        if blocked:
+            all_blocked = len(blocked) == len(PRIMARY_AI_BOTS)
+            names = ", ".join(r.bot for r in blocked)
+            findings.append(
+                Finding(
+                    "robots",
+                    "critical" if all_blocked else "high",
+                    "ai_bot_blocked",
+                    f"AI crawlers blocked: {names}",
+                    f"{base}/robots.txt",
+                )
+            )
+
+    if "sitemap:" not in robots_text.lower():
+        findings.append(Finding("robots", "low", "robots_missing_sitemap", "robots.txt declares no Sitemap", f"{base}/robots.txt", fix_owner="client_dev"))
+
+    return [rule.as_dict() for rule in effective_bot_rules(groups)]
+
+
+# ── JSON-LD validity + entity drift (FR-16/17) ───────────────────────────────
+
+_ORG_TYPES = {"Organization", "Corporation", "LocalBusiness", "Person", "EducationalOrganization"}
+
+
+def _iter_nodes(node: Any) -> list[dict[str, Any]]:
+    """Every dict node in a JSON-LD tree (including @graph children)."""
+    found: list[dict[str, Any]] = []
+    if isinstance(node, list):
+        for item in node:
+            found.extend(_iter_nodes(item))
+    elif isinstance(node, dict):
+        found.append(node)
+        graph = node.get("@graph")
+        if isinstance(graph, list):
+            for item in graph:
+                found.extend(_iter_nodes(item))
+    return found
+
+
+def _name_matches(found: str, expected: list[str]) -> bool:
+    """Loose brand-name match: case/punctuation-insensitive substring either way."""
+    def norm(value: str) -> str:
+        return re.sub(r"[^a-z0-9 ]+", " ", value.casefold()).strip()
+
+    f = norm(found)
+    return any(e and (e in f or f in e) for e in (norm(name) for name in expected))
+
+
+def validate_jsonld(jsonld: list[Any], expected_names: list[str] | None = None) -> list[tuple[str, str, str]]:
+    """Return (rule, severity, detail) issues for one page's JSON-LD blocks.
+
+    Checks validity (parse errors, @context, @type), Organization completeness
+    (name, sameAs) and — when ``expected_names`` is supplied — entity drift
+    between the JSON-LD Organization name and the client's brand/aliases.
+    """
+    issues: list[tuple[str, str, str]] = []
+    names = [n for n in (expected_names or []) if n.strip()]
+
+    errors = [n for n in jsonld if isinstance(n, dict) and n.get("_parse_error")]
+    if errors:
+        raw = str(errors[0].get("_raw", ""))[:120].replace("\n", " ")
+        more = f" (+{len(errors) - 1} more blocks)" if len(errors) > 1 else ""
+        issues.append(("jsonld_parse_error", "high", f"Invalid JSON-LD: {raw}{more}"))
+
+    top_nodes = [n for n in jsonld if isinstance(n, dict) and not n.get("_parse_error")]
+    if top_nodes and not any("@context" in n for n in top_nodes):
+        issues.append(("jsonld_missing_context", "medium", "JSON-LD has no @context (schema.org)"))
+
+    all_nodes: list[dict[str, Any]] = []
+    for node in top_nodes:
+        all_nodes.extend(_iter_nodes(node))
+
+    if any("@type" not in n and "@graph" not in n for n in all_nodes):
+        issues.append(("jsonld_missing_type", "medium", "A JSON-LD node has no @type"))
+
+    name_missing = name_mismatch = same_as_missing = False
+    for node in all_nodes:
+        types = node.get("@type")
+        type_set = {types} if isinstance(types, str) else set(types or [])
+        if not type_set & _ORG_TYPES:
+            continue
+        name = node.get("name")
+        if not isinstance(name, str) or not name.strip():
+            name_missing = True
+        elif names and not _name_matches(name, names) and not name_mismatch:
+            name_mismatch = True
+            issues.append(
+                ("entity_name_mismatch", "medium",
+                 f"JSON-LD name '{name}' does not match the brand ({', '.join(names[:3])}) — possible entity drift")
+            )
+        same_as = node.get("sameAs")
+        if not same_as or (isinstance(same_as, list) and not any(same_as)):
+            same_as_missing = True
+
+    if name_missing:
+        issues.append(("organization_missing_name", "medium", "Organization JSON-LD has no name"))
+    if same_as_missing:
+        issues.append(("organization_missing_sameAs", "low", "Organization JSON-LD has no sameAs profiles"))
+    return issues
+
+
+# ── Scoring / fetching ────────────────────────────────────────────────────────
+
+
 def _score(findings: list[Finding]) -> float:
     deductions = sum(_SEVERITY_PENALTY.get(f.severity, 0) for f in findings)
     return float(max(0, 100 - deductions))
@@ -209,7 +509,83 @@ async def _fetch(client: httpx.AsyncClient, url: str) -> tuple[int | None, str, 
         return None, "", 0
 
 
-def _audit_home_insights(url: str, html: str, findings: list[Finding], load_ms: int) -> None:
+async def _fetch_pagespeed(
+    client: httpx.AsyncClient, base: str, api_key: str
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Mobile Lighthouse summary via the PageSpeed Insights API.
+
+    Returns ``(payload, None)`` on success and ``(None, reason)`` on failure;
+    without an API key the caller records ``not_configured`` instead of calling
+    (the keyless endpoint shares an anonymous quota and returns 429).
+    """
+    try:
+        resp = await client.get(
+            PAGESPEED_ENDPOINT,
+            params={"url": base, "strategy": "mobile", "category": "performance", "key": api_key},
+            timeout=PAGESPEED_TIMEOUT,
+        )
+        if resp.status_code != 200:
+            return None, f"HTTP {resp.status_code}: {resp.text[:160]}"
+        data = resp.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+    lighthouse = data.get("lighthouseResult") or {}
+    audits = lighthouse.get("audits") or {}
+    categories = lighthouse.get("categories") or {}
+
+    def _num(name: str) -> float | None:
+        value = (audits.get(name) or {}).get("numericValue")
+        return float(value) if isinstance(value, (int, float)) else None
+
+    perf = (categories.get("performance") or {}).get("score")
+    cls = _num("cumulative-layout-shift")
+    payload: dict[str, Any] = {
+        "status": "ok",
+        "strategy": "mobile",
+        "performance_score": round(float(perf) * 100) if isinstance(perf, (int, float)) else None,
+        "lcp_ms": int(_num("largest-contentful-paint") or 0) or None,
+        "cls": round(cls, 3) if cls is not None else None,
+        "tbt_ms": int(_num("total-blocking-time") or 0) or None,
+        "fcp_ms": int(_num("first-contentful-paint") or 0) or None,
+        "si_ms": int(_num("speed-index") or 0) or None,
+        "final_url": str(lighthouse.get("finalUrl") or base),
+        "fetched_at": datetime.now(UTC).isoformat(),
+    }
+    return payload, None
+
+
+def _speed_findings(payload: dict[str, Any], base: str, findings: list[Finding]) -> None:
+    """Findings from a successful PageSpeed payload (Lighthouse thresholds)."""
+    score = payload.get("performance_score")
+    if isinstance(score, int):
+        if score < 50:
+            findings.append(Finding("speed", "high", "pagespeed_score_low", f"Lighthouse mobile performance {score}/100", base, fix_owner="client_dev"))
+        elif score < 90:
+            findings.append(Finding("speed", "medium", "pagespeed_score_low", f"Lighthouse mobile performance {score}/100", base, fix_owner="client_dev"))
+
+    lcp = payload.get("lcp_ms")
+    if isinstance(lcp, int):
+        if lcp > 4000:
+            findings.append(Finding("speed", "high", "slow_lcp", f"LCP {round(lcp / 1000, 1)}s on mobile (>4s)", base, fix_owner="client_dev"))
+        elif lcp > 2500:
+            findings.append(Finding("speed", "medium", "slow_lcp", f"LCP {round(lcp / 1000, 1)}s on mobile (>2.5s)", base, fix_owner="client_dev"))
+
+    cls = payload.get("cls")
+    if isinstance(cls, (int, float)):
+        if cls > 0.25:
+            findings.append(Finding("speed", "medium", "high_cls", f"CLS {cls} on mobile (>0.25)", base, fix_owner="client_dev"))
+        elif cls > 0.1:
+            findings.append(Finding("speed", "low", "high_cls", f"CLS {cls} on mobile (>0.1)", base, fix_owner="client_dev"))
+
+
+def _audit_home_insights(
+    url: str,
+    html: str,
+    findings: list[Finding],
+    load_ms: int,
+    expected_names: list[str] | None = None,
+) -> None:
     ins = parse_html(html)
 
     # ── meta ──
@@ -233,10 +609,12 @@ def _audit_home_insights(url: str, html: str, findings: list[Finding], load_ms: 
         findings.append(Finding("schema", "high", "missing_json_ld", "No JSON-LD structured data", url))
     else:
         types = _extract_schema_types(ins.jsonld)
-        if not types & {"Organization", "LocalBusiness", "Corporation", "Person"}:
+        if not types & _ORG_TYPES:
             findings.append(Finding("schema", "medium", "missing_org_schema", f"JSON-LD lacks an entity type (found: {sorted(types) or 'none'})", url))
         if "FAQPage" not in types and "HowTo" not in types:
             findings.append(Finding("schema", "low", "missing_faq_schema", "No FAQPage/HowTo schema (helps answer-engine citation)", url))
+        for rule, severity, detail in validate_jsonld(ins.jsonld, expected_names):
+            findings.append(Finding("schema", severity, rule, detail, url))
 
     # ── entity / content ──
     if ins.h1_count == 0:
@@ -261,21 +639,9 @@ def _audit_site_files(
     sitemap_text: str,
     llms_status: int | None,
     findings: list[Finding],
-) -> int:
-    """Audit robots/sitemap/llms.txt; return number of sitemap URLs found."""
-    # ── robots ──
-    if robots_status != 200:
-        findings.append(Finding("robots", "high", "missing_robots", "robots.txt missing or unreachable", f"{base}/robots.txt"))
-    else:
-        disallow_all = any(
-            line.strip().lower() == "disallow: /"
-            for line in robots_text.splitlines()
-            if not line.strip().lower().startswith(("user-agent", "#"))
-        )
-        if disallow_all:
-            findings.append(Finding("robots", "critical", "robots_disallow_all", "robots.txt disallows all crawlers", f"{base}/robots.txt"))
-        if "sitemap:" not in robots_text.lower():
-            findings.append(Finding("robots", "low", "robots_missing_sitemap", "robots.txt declares no Sitemap", f"{base}/robots.txt", fix_owner="client_dev"))
+) -> tuple[int, list[dict[str, Any]]]:
+    """Audit robots/sitemap/llms.txt; return (sitemap urls found, AI bot rules)."""
+    robots_rules = _audit_robots(base, robots_status, robots_text, findings)
 
     # ── sitemap ──
     urls: list[str] = []
@@ -290,14 +656,22 @@ def _audit_site_files(
     if llms_status != 200:
         findings.append(Finding("llms_txt", "medium", "missing_llms_txt", "llms.txt absent — no LLM-oriented site guide", f"{base}/llms.txt", fix_owner="client_dev"))
 
-    return len(urls)
+    return len(urls), robots_rules
 
 
-async def run_site_audit(base_url: str, transport: httpx.AsyncBaseTransport | None = None) -> AuditResult:
+async def run_site_audit(
+    base_url: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+    entity_names: list[str] | None = None,
+    pagespeed_key: str = "",
+) -> AuditResult:
     """Fetch a live site, derive findings, and return the scored result.
 
     Callers persist the result; this function has no database access so it
     stays unit-testable — pass an ``httpx.MockTransport`` as ``transport``.
+
+    ``entity_names`` (brand name + aliases) enables entity-drift checks; a
+    non-empty ``pagespeed_key`` enables the mobile PageSpeed Insights call.
     """
     base = base_url.rstrip("/")
     if not base.startswith(("http://", "https://")):
@@ -306,6 +680,8 @@ async def run_site_audit(base_url: str, transport: httpx.AsyncBaseTransport | No
 
     findings: list[Finding] = []
     pages: list[PageRecord] = []
+    robots_rules: list[dict[str, Any]] = []
+    speed: dict[str, Any]
 
     async with httpx.AsyncClient(
         timeout=FETCH_TIMEOUT, follow_redirects=True, transport=transport,
@@ -316,7 +692,7 @@ async def run_site_audit(base_url: str, transport: httpx.AsyncBaseTransport | No
         if home_status is None or home_status >= 400:
             findings.append(Finding("meta", "critical", "unreachable_homepage", f"Homepage returned {home_status}", base))
         elif home_status == 200:
-            _audit_home_insights(base, home_html, findings, home_ms)
+            _audit_home_insights(base, home_html, findings, home_ms, entity_names)
             ins = parse_html(home_html)
             pages.append(
                 PageRecord(
@@ -341,7 +717,21 @@ async def run_site_audit(base_url: str, transport: httpx.AsyncBaseTransport | No
         robots_status, robots_text, _ = await _fetch(client, f"{base}/robots.txt")
         sitemap_status, sitemap_text, _ = await _fetch(client, f"{base}/sitemap.xml")
         llms_status, _, _ = await _fetch(client, f"{base}/llms.txt")
-        sitemap_url_count = _audit_site_files(base, robots_status, robots_text, sitemap_status, sitemap_text, llms_status, findings)
+        sitemap_url_count, robots_rules = _audit_site_files(
+            base, robots_status, robots_text, sitemap_status, sitemap_text, llms_status, findings
+        )
+
+        # PageSpeed Insights (mobile) — explicit not_configured without a key.
+        if pagespeed_key:
+            payload, reason = await _fetch_pagespeed(client, base, pagespeed_key)
+            if payload is not None:
+                speed = payload
+                _speed_findings(payload, base, findings)
+            else:
+                speed = {"status": "error", "reason": (reason or "unknown")[:200]}
+                logger.warning("pagespeed_failed", host=host, reason=(reason or "")[:200])
+        else:
+            speed = {"status": "not_configured", "reason": "PAGESPEED_API_KEY not set"}
 
         # Resolve page URLs; if the sitemap is an index (common: .xml.gz
         # children), follow one bounded level of child sitemaps.
@@ -392,12 +782,14 @@ async def run_site_audit(base_url: str, transport: httpx.AsyncBaseTransport | No
                 )
 
     score = _score(findings)
-    summary = {
+    summary: dict[str, Any] = {
         "base_url": base,
         "host": host,
         "pages_crawled": len(pages),
         "page_urls": [p.url for p in pages],
         "sitemap_urls": sitemap_url_count,
+        "robots_rules": robots_rules,
+        "speed": speed,
         "findings_by_severity": {
             sev: sum(1 for f in findings if f.severity == sev) for sev in ("critical", "high", "medium", "low")
         },

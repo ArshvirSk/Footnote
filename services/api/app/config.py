@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     judge_mode: str = "rules"
     judge_model: str = "gpt-5-mini"
 
+    # PageSpeed Insights (site audit). Optional: without a key the audit records
+    # an explicit "not_configured" state instead of calling the API (the keyless
+    # endpoint shares an anonymous quota and returns 429 in practice).
+    pagespeed_api_key: str = ""
+
     # Stripe webhook signature verification (HMAC secret); empty = webhook disabled
     stripe_webhook_secret: str = ""
 
