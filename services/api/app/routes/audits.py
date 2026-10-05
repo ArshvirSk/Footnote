@@ -72,6 +72,7 @@ class AuditResponse(BaseModel):
     finished_at: datetime | None
     score: float | None
     summary: dict[str, Any]
+    rerun_of: UUID | None = None
 
 
 class AuditDetailResponse(AuditResponse):
@@ -331,7 +332,7 @@ async def list_audits(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     res = await db.execute(
         text(
-            "SELECT id, client_id, started_at, finished_at, score, summary FROM audits "
+            "SELECT id, client_id, started_at, finished_at, score, summary, rerun_of FROM audits "
             "WHERE client_id = :cid ORDER BY started_at DESC LIMIT 20"
         ),
         {"cid": str(client_id)},
@@ -340,7 +341,7 @@ async def list_audits(
         AuditResponse(
             id=r.id, client_id=r.client_id, started_at=r.started_at,
             finished_at=r.finished_at, score=float(r.score) if r.score is not None else None,
-            summary=r.summary or {},
+            summary=r.summary or {}, rerun_of=r.rerun_of,
         )
         for r in res.all()
     ]
@@ -474,7 +475,8 @@ async def _run_and_persist(
 async def _audit_detail(db: AsyncSession, audit_id: UUID, client_id: UUID) -> AuditDetailResponse:
     res = await db.execute(
         text(
-            "SELECT id, client_id, started_at, finished_at, score, summary FROM audits WHERE id = :aid"
+            "SELECT id, client_id, started_at, finished_at, score, summary, rerun_of "
+            "FROM audits WHERE id = :aid"
         ),
         {"aid": str(audit_id)},
     )
@@ -524,6 +526,7 @@ async def _audit_detail(db: AsyncSession, audit_id: UUID, client_id: UUID) -> Au
         finished_at=row.finished_at,
         score=float(row.score) if row.score is not None else None,
         summary=row.summary or {},
+        rerun_of=row.rerun_of,
         findings=[
             FindingResponse(
                 id=f.id, category=f.category, severity=f.severity, rule=f.rule,
