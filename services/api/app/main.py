@@ -21,6 +21,7 @@ from services.api.app.routes import (
     health,
     integrations,
     prompts,
+    publishing,
     research,
     tracking,
     websites,
@@ -75,6 +76,7 @@ app.include_router(research.router, prefix="/api/v1")
 app.include_router(tracking.router, prefix="/api/v1")
 app.include_router(integrations.router, prefix="/api/v1")
 app.include_router(content.router, prefix="/api/v1")
+app.include_router(publishing.router, prefix="/api/v1")
 app.include_router(edge.router, prefix="/api/v1")
 app.include_router(billing.router, prefix="/api/v1")
 app.include_router(gaps.router, prefix="/api/v1")
