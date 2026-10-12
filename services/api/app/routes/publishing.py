@@ -10,7 +10,7 @@ from uuid import UUID
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from services.api.app.auth import AuthUser, MemberRole, require_roles
+from services.api.app.auth import AuthUser, MemberRole, has_client_access, require_roles
 from services.api.app.crypto import (
     decrypt_credentials,
     encrypt_credentials,
@@ -99,20 +99,7 @@ class PublicationRecord(BaseModel):
 # ───────────── Permission Helper ─────────────
 
 async def _verify_client_access(user: AuthUser, client_id: UUID, db: AsyncSession) -> None:
-    res = await db.execute(
-        text(
-            """
-            SELECT 1 FROM client_members cm
-            WHERE cm.client_id = :cid AND cm.user_id = :uid
-            UNION
-            SELECT 1 FROM clients c
-            JOIN org_members om ON om.org_id = c.org_id
-            WHERE c.id = :cid AND om.user_id = :uid
-            """
-        ),
-        {"cid": str(client_id), "uid": str(user.id)},
-    )
-    if not res.first():
+    if not await has_client_access(user, client_id, db):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
 
@@ -573,10 +560,10 @@ async def publish_content_item(
     approval_res = await db.execute(
         text(
             """
-            SELECT id, status, decision, reviewer_id, decided_at
+            SELECT id, status, reviewer_id, decided_at
             FROM approvals
             WHERE client_id = :cid
-              AND subject_type = 'content_version'
+              AND subject_type IN ('version', 'content_version')
               AND subject_id = :vid
               AND status = 'approved'
             ORDER BY decided_at DESC NULLS LAST
@@ -615,12 +602,19 @@ async def publish_content_item(
             any_row = any_target_res.first()
             if any_row:
                 target_id = any_row.id
-
-    if not target_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No publish target configured. Please add a publishing target (e.g. WordPress or Feeds) first.",
-        )
+            else:
+                # Auto-provision native Footnote Feeds edge target as default
+                new_tgt = await db.execute(
+                    text(
+                        """
+                        INSERT INTO publish_targets (client_id, name, kind, is_default, status)
+                        VALUES (:cid, 'Edge Feeds', 'feeds', true, 'active')
+                        RETURNING id
+                        """
+                    ),
+                    {"cid": str(client_id)},
+                )
+                target_id = new_tgt.one().id
 
     # 4. Insert Publication Record
     pub_res = await db.execute(
@@ -646,7 +640,7 @@ async def publish_content_item(
         text(
             """
             UPDATE content_items
-            SET publish_target_id = :tid, status = 'publishing'
+            SET publish_target_id = :tid, status = 'scheduled'
             WHERE id = :did AND client_id = :cid
             """
         ),

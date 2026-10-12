@@ -132,7 +132,7 @@ class FeedsBuilder:
             res = await conn.execute(
                 text(
                     """
-                    SELECT c.name as client_name, c.domain,
+                    SELECT c.name as client_name, c.primary_domain as domain,
                            bp.theme_html, bp.theme_css, bp.positioning,
                            fs.mount_path, fs.custom_domain
                     FROM clients c
@@ -151,7 +151,7 @@ class FeedsBuilder:
             items_res = await conn.execute(
                 text(
                     """
-                    SELECT ci.id, ci.title, ci.published_url, ci.published_at,
+                    SELECT ci.id, cv.title, ci.published_url, ci.published_at,
                            cv.body_md, cv.word_count, cv.reading_time_min, cv.claims
                     FROM content_items ci
                     JOIN content_versions cv ON cv.id = ci.current_version_id
