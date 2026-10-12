@@ -238,8 +238,13 @@ def _template_draft(brief: dict[str, Any]) -> dict[str, Any]:
         "meta_description": angle[:160],
         "json_ld": json_ld,
         "claims": [
-            {"text": c, "source": "pending", "status": "unsourced"}
-            for c in grounding.get("required_claims", [])
+            {"text": str(c), "source": "pending", "status": "unsourced"}
+            for c in (
+                grounding.get("required_claims")
+                or brief.get("sources")
+                or [p for s in outline for p in s.get("points", [])][:3]
+                or ["Core claim"]
+            )
         ],
         "word_count": word_count,
         "issues": ["Template-generated: all claims need human sourcing"],
@@ -251,6 +256,7 @@ def _template_draft(brief: dict[str, Any]) -> dict[str, Any]:
 async def generate_draft(
     client_id: str,
     brief_id: str,
+    content_item_id: str | None = None,
 ) -> dict[str, Any]:
     """Run the 3-pass content generation pipeline for a brief.
 
@@ -293,6 +299,7 @@ async def generate_draft(
         "title": brief_row.title,
         "angle": brief_row.angle,
         "outline": brief_row.outline or [],
+        "sources": brief_row.sources or [],
         "grounding": brief_row.grounding_rules or {},
     }
     brand_profile = (
@@ -379,16 +386,18 @@ async def generate_draft(
             agent_run_id = ar_res.scalar()
 
         # Check for existing content_item for this brief
-        existing = await conn.execute(
-            text(
-                "SELECT id FROM content_items WHERE brief_id = :bid AND client_id = :cid"
-            ),
-            {"bid": brief_id, "cid": client_id},
-        )
-        item_row = existing.first()
+        if not content_item_id:
+            existing = await conn.execute(
+                text(
+                    "SELECT id FROM content_items WHERE brief_id = :bid AND client_id = :cid"
+                ),
+                {"bid": brief_id, "cid": client_id},
+            )
+            item_row = existing.first()
+            if item_row:
+                content_item_id = item_row.id
 
-        if item_row:
-            content_item_id = item_row.id
+        if content_item_id:
             # Get next version number
             ver_res = await conn.execute(
                 text(
@@ -534,3 +543,7 @@ async def generate_draft(
         "passes": passes,
         "issues": editor_result.get("issues", []),
     }
+
+
+# Backwards-compatible / descriptive alias
+generate_draft_from_brief = generate_draft
