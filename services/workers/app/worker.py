@@ -786,6 +786,56 @@ async def compute_rollup_for_day(day: str) -> dict[str, int]:
         )
         stats["competitor_gaps"] = result.rowcount or 0
 
+        # 5. Prove-Then-Close: close verified_published gaps when today's collection proves brand visibility
+        result = await conn.execute(
+            text(
+                """
+                WITH proved_prompts AS (
+                    SELECT DISTINCT a.client_id, a.prompt_id
+                    FROM answers a
+                    WHERE a.status = 'succeeded'
+                      AND a.collected_at >= CAST(:day AS date)
+                      AND a.collected_at < CAST(:day AS date) + 1
+                      AND (
+                        EXISTS (SELECT 1 FROM brand_mentions bm
+                                WHERE bm.answer_id = a.id AND bm.entity_kind = 'brand')
+                        OR EXISTS (SELECT 1 FROM answer_citations ac
+                                   WHERE ac.answer_id = a.id AND ac.is_brand_owned)
+                      )
+                )
+                UPDATE gaps
+                SET status = 'won',
+                    closed_at = now(),
+                    details = jsonb_set(
+                        coalesce(details, '{}'::jsonb),
+                        '{closed_by_collection_day}',
+                        to_jsonb(CAST(:day AS text))
+                    )
+                WHERE status = 'verified_published'
+                  AND (client_id, prompt_id) IN (SELECT client_id, prompt_id FROM proved_prompts)
+                """
+            ),
+            {"day": day_date},
+        )
+        stats["closed_proved_gaps"] = result.rowcount or 0
+
+        # Flag stalled gaps (verified > 14 days ago without citations)
+        await conn.execute(
+            text(
+                """
+                UPDATE gaps
+                SET details = jsonb_set(
+                    coalesce(details, '{}'::jsonb),
+                    '{citation_stalled}',
+                    'true'::jsonb
+                )
+                WHERE status = 'verified_published'
+                  AND verified_at < now() - interval '14 days'
+                  AND NOT (coalesce(details->>'citation_stalled', 'false') = 'true')
+                """
+            )
+        )
+
     return stats
 
 
