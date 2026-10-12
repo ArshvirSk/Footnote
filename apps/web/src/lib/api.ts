@@ -686,6 +686,173 @@ export const trackingApi = {
     api.get<DailyMetric[]>(`/clients/${clientId}/metrics/daily?days=${days}`),
 };
 
+export interface ContentBrief {
+  id: string;
+  client_id: string;
+  title: string | null;
+  angle: string | null;
+  outline: Array<{ heading: string; points: string[]; sources_needed?: string[] }>;
+  sources: string[];
+  status: string;
+  gap_ids: string[];
+  grounding_rules: Record<string, any>;
+  agent_run_id: string | null;
+  created_at: string | null;
+  item_count?: number;
+  approval_id?: string | null;
+  approval_status?: string;
+  approval_comment?: string | null;
+  prompts?: Array<{ id: string; text: string; funnel_stage?: string; kind?: string }>;
+}
+
+export interface ContentVersionSummary {
+  id: string;
+  version_no: number;
+  title: string;
+  author_kind: string;
+  word_count: number;
+  reading_time_min: number | null;
+  created_at: string;
+  approval_status?: string;
+}
+
+export interface ContentVersion extends ContentVersionSummary {
+  content_item_id: string;
+  body_md: string;
+  body_html: string | null;
+  jsonld: Record<string, any>;
+  meta: Record<string, any>;
+  claims: Array<{ text?: string; claim?: string; source?: string; status?: string }>;
+  approval_id?: string | null;
+  approval_comment?: string | null;
+}
+
+export interface ContentItem {
+  id: string;
+  client_id: string;
+  brief_id: string | null;
+  brief?: { id: string; title: string; angle: string; outline: any[]; sources: string[] } | null;
+  type: string;
+  slug: string | null;
+  status: "idea" | "briefed" | "drafting" | "in_review" | "client_review" | "approved" | "scheduled" | "published" | "refresh_needed" | "archived";
+  title: string;
+  current_version_id: string | null;
+  current_version?: ContentVersion | null;
+  version_no?: number;
+  word_count?: number;
+  reading_time_min?: number | null;
+  claims_count?: number;
+  approval_id?: string | null;
+  approval_status?: string;
+  publish_target_kind?: string | null;
+  publish_target_id?: string | null;
+  published_url?: string | null;
+  published_at?: string | null;
+  decay_score?: number;
+  created_at: string | null;
+  versions?: ContentVersionSummary[];
+  prompts?: Array<{ id: string; text: string; funnel_stage?: string; is_primary?: boolean }>;
+  publications?: Array<{ id: string; status: string; url?: string; external_id?: string; published_at?: string; error?: string }>;
+}
+
+export interface ApprovalItem {
+  id: string;
+  subject_type: "brief" | "version" | "outreach" | "refresh" | "memo";
+  subject_id: string;
+  title: string;
+  subtitle: string | null;
+  item_id: string | null;
+  item_status: string | null;
+  status: "pending" | "approved" | "rejected" | "changes_requested";
+  comment: string | null;
+  requested_by: string | null;
+  reviewer_id: string | null;
+  requested_at: string | null;
+  decided_at: string | null;
+}
+
+export interface KanbanCard {
+  id: string;
+  type: "Gap" | "Brief" | "Draft";
+  title: string;
+  subtitle?: string;
+  gap_id?: string;
+  brief_id?: string;
+  item_id?: string;
+  current_version_id?: string;
+  status: string;
+  approval_id?: string | null;
+  approval_status?: string | null;
+  published_url?: string | null;
+  decay_score?: number;
+}
+
+export interface PipelineKanbanColumn {
+  id: string;
+  name: string;
+  count: number;
+  items: KanbanCard[];
+}
+
+export interface PipelineKanbanResponse {
+  columns: PipelineKanbanColumn[];
+}
+
+export interface VersionDiffResponse {
+  v1: number;
+  v2: number;
+  diff: string[];
+  word_count_change: number;
+}
+
+export const contentApi = {
+  pipeline: (clientId: string) =>
+    api.get<PipelineKanbanResponse>(`/clients/${clientId}/content/pipeline`),
+  listItems: (clientId: string, params?: { status?: string; type?: string; limit?: number; offset?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.status) q.set("status", params.status);
+    if (params?.type) q.set("type", params.type);
+    if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.offset) q.set("offset", String(params.offset));
+    const qs = q.toString() ? `?${q.toString()}` : "";
+    return api.get<ContentItem[]>(`/clients/${clientId}/content/items${qs}`);
+  },
+  getItem: (clientId: string, itemId: string) =>
+    api.get<ContentItem>(`/clients/${clientId}/content/items/${itemId}`),
+  createItem: (clientId: string, body: { brief_id?: string; type?: string; title?: string; slug?: string }) =>
+    api.post<{ id: string; status: string; created_at: string }>(`/clients/${clientId}/content/items`, body),
+  updateItem: (clientId: string, itemId: string, body: { status?: string; slug?: string; type?: string; publish_target_id?: string }) =>
+    api.patch<{ id: string; status: string }>(`/clients/${clientId}/content/items/${itemId}`, body),
+  listBriefs: (clientId: string, status?: string) =>
+    api.get<ContentBrief[]>(`/clients/${clientId}/content/briefs${status ? `?status=${status}` : ""}`),
+  getBrief: (clientId: string, briefId: string) =>
+    api.get<ContentBrief>(`/clients/${clientId}/content/briefs/${briefId}`),
+  createBrief: (clientId: string, body: Partial<ContentBrief>) =>
+    api.post<{ id: string; status: string; created_at: string }>(`/clients/${clientId}/content/briefs`, body),
+  generateBrief: (clientId: string, gapId: string) =>
+    api.post<{ brief_id: string; title: string; outline: any }>(`/clients/${clientId}/content/briefs/generate`, { gap_id: gapId }),
+  generateDraft: (clientId: string, briefId: string, itemId?: string) =>
+    api.post<{ content_item_id: string; version_id: string; version_no: number; title: string; body_md: string; claims: any[] }>(
+      `/clients/${clientId}/content/drafts/generate`,
+      { brief_id: briefId, content_item_id: itemId }
+    ),
+  listVersions: (clientId: string, itemId: string) =>
+    api.get<ContentVersionSummary[]>(`/clients/${clientId}/content/items/${itemId}/versions`),
+  getVersion: (clientId: string, itemId: string, versionId: string) =>
+    api.get<ContentVersion>(`/clients/${clientId}/content/items/${itemId}/versions/${versionId}`),
+  createVersion: (clientId: string, itemId: string, body: { title: string; body_md: string; body_html?: string; claims?: any[]; meta?: any }) =>
+    api.post<{ id: string; version_no: number; word_count: number; reading_time_min: number; status: string }>(
+      `/clients/${clientId}/content/items/${itemId}/versions`,
+      body
+    ),
+  diffVersions: (clientId: string, itemId: string, v1: number, v2: number) =>
+    api.get<VersionDiffResponse>(`/clients/${clientId}/content/items/${itemId}/diff?v1=${v1}&v2=${v2}`),
+  listApprovals: (clientId: string, status?: string) =>
+    api.get<ApprovalItem[]>(`/clients/${clientId}/content/approvals${status ? `?status=${status}` : ""}`),
+  actionApproval: (clientId: string, approvalId: string, action: "approve" | "reject" | "request_changes", comment?: string) =>
+    api.post<{ status: string; new_status: string }>(`/clients/${clientId}/content/approvals/${approvalId}/action`, { action, comment }),
+};
+
 export const me = () => api.get<Me>("/auth/me");
 
 /** Resolve the client every ops page should operate on.
