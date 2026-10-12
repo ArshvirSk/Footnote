@@ -853,6 +853,75 @@ export const contentApi = {
     api.post<{ status: string; new_status: string }>(`/clients/${clientId}/content/approvals/${approvalId}/action`, { action, comment }),
 };
 
+export interface PublishTarget {
+  id: string;
+  client_id: string;
+  name?: string;
+  kind: "wordpress" | "feeds" | "webhook" | "webflow" | "shopify" | "ghost" | string;
+  is_default: boolean;
+  status: string;
+  config: Record<string, any>;
+  last_tested_at?: string;
+  last_test_status?: string;
+  last_test_error?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface PublishTargetCreate {
+  name: string;
+  kind: string;
+  is_default?: boolean;
+  config: Record<string, any>;
+}
+
+export interface PublishTargetTestResponse {
+  status: "success" | "failed";
+  detail: string;
+  latency_ms: number;
+  data?: Record<string, any>;
+}
+
+export interface PublicationRecord {
+  id: string;
+  content_item_id: string;
+  client_id: string;
+  version_id?: string;
+  target_id?: string;
+  external_id?: string;
+  url?: string;
+  status: "queued" | "running" | "succeeded" | "failed" | string;
+  error?: string;
+  title?: string;
+  jsonld_verified: boolean;
+  canonical_verified: boolean;
+  http_status?: number;
+  verified_at?: string;
+  published_at?: string;
+}
+
+export const publishingApi = {
+  listTargets: (clientId: string) =>
+    api.get<PublishTarget[]>(`/clients/${clientId}/publish-targets`),
+  createTarget: (clientId: string, body: PublishTargetCreate) =>
+    api.post<PublishTarget>(`/clients/${clientId}/publish-targets`, body),
+  getTarget: (clientId: string, targetId: string) =>
+    api.get<PublishTarget>(`/clients/${clientId}/publish-targets/${targetId}`),
+  updateTarget: (clientId: string, targetId: string, body: Partial<PublishTargetCreate> & { status?: string }) =>
+    api.patch<PublishTarget>(`/clients/${clientId}/publish-targets/${targetId}`, body),
+  deleteTarget: (clientId: string, targetId: string) =>
+    api.delete<{ status: string }>(`/clients/${clientId}/publish-targets/${targetId}`),
+  testTarget: (clientId: string, targetId: string) =>
+    api.post<PublishTargetTestResponse>(`/clients/${clientId}/publish-targets/${targetId}/test`),
+  publishItem: (clientId: string, itemId: string, body?: { target_id?: string; post_status?: string }) =>
+    api.post<{ status: string; publication_id: string; target_id: string; message: string }>(
+      `/clients/${clientId}/content-items/${itemId}/publish`,
+      body || {}
+    ),
+  listPublications: (clientId: string, itemId?: string) =>
+    api.get<PublicationRecord[]>(`/clients/${clientId}/publications${itemId ? `?content_item_id=${itemId}` : ""}`),
+};
+
 export const me = () => api.get<Me>("/auth/me");
 
 /** Resolve the client every ops page should operate on.

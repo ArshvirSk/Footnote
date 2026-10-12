@@ -13,6 +13,7 @@ import {
   FileCode,
   FileText,
   GitCompare,
+  Globe,
   History,
   Layers,
   Loader2,
@@ -31,6 +32,9 @@ import {
   ContentItem,
   ContentVersion,
   getDefaultClientId,
+  publishingApi,
+  PublishTarget,
+  PublicationRecord,
   VersionDiffResponse,
 } from "@/lib/api";
 
@@ -49,7 +53,7 @@ export default function ContentWorkspacePage({
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const [item, setItem] = useState<ContentItem | null>(null);
-  const [activeTab, setActiveTab] = useState<"editor" | "claims" | "diff" | "brief">("editor");
+  const [activeTab, setActiveTab] = useState<"editor" | "claims" | "diff" | "brief" | "publications">("editor");
 
   // Editor state
   const [editorTitle, setEditorTitle] = useState("");
@@ -67,12 +71,24 @@ export default function ContentWorkspacePage({
   const [approvalAction, setApprovalAction] = useState<"approve" | "reject" | "request_changes">("approve");
   const [approvalComment, setApprovalComment] = useState("");
 
+  // Publishing state
+  const [publications, setPublications] = useState<PublicationRecord[]>([]);
+  const [publishTargets, setPublishTargets] = useState<PublishTarget[]>([]);
+  const [showPublishModal, setShowPublishModal] = useState(false);
+  const [selectedTargetId, setSelectedTargetId] = useState("");
+  const [postStatus, setPostStatus] = useState<"publish" | "draft">("publish");
+  const [loadingTargets, setLoadingTargets] = useState(false);
+
   const loadItem = async (cid: string) => {
     try {
       setLoading(true);
       setError(null);
-      const data = await contentApi.getItem(cid, itemId);
+      const [data, pubs] = await Promise.all([
+        contentApi.getItem(cid, itemId),
+        publishingApi.listPublications(cid, itemId).catch(() => []),
+      ]);
       setItem(data);
+      setPublications(pubs);
       if (data.current_version) {
         setEditorTitle(data.current_version.title || data.title || "");
         setEditorMd(data.current_version.body_md || "");
@@ -152,12 +168,33 @@ export default function ContentWorkspacePage({
     }
   };
 
-  const handlePublish = async () => {
+  const openPublishModal = async () => {
+    if (!clientId) return;
+    try {
+      setLoadingTargets(true);
+      const targets = await publishingApi.listTargets(clientId);
+      setPublishTargets(targets);
+      const defaultT = targets.find((t) => t.is_default) || targets[0];
+      if (defaultT) setSelectedTargetId(defaultT.id);
+      setShowPublishModal(true);
+    } catch (err: any) {
+      setError(err?.message || "Failed to load publishing targets");
+    } finally {
+      setLoadingTargets(false);
+    }
+  };
+
+  const executePublish = async () => {
     if (!clientId) return;
     try {
       setActionLoading("publish");
-      await contentApi.updateItem(clientId, itemId, { status: "published" });
-      setNotice("Content published successfully!");
+      setError(null);
+      await publishingApi.publishItem(clientId, itemId, {
+        target_id: selectedTargetId || undefined,
+        post_status: postStatus,
+      });
+      setShowPublishModal(false);
+      setNotice("Publication dispatched! Verifying live status...");
       await loadItem(clientId);
     } catch (err: any) {
       setError(err?.message || "Publish blocked: Ensure version approval gate is signed off.");
@@ -239,7 +276,7 @@ export default function ContentWorkspacePage({
 
           {isApproved && (
             <button
-              onClick={handlePublish}
+              onClick={openPublishModal}
               disabled={actionLoading === "publish"}
               className="inline-flex items-center px-3.5 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-medium hover:bg-slate-800 shadow-sm transition disabled:opacity-50"
             >
@@ -253,15 +290,26 @@ export default function ContentWorkspacePage({
           )}
 
           {isPublished && item?.published_url && (
-            <a
-              href={item.published_url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center px-3.5 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 shadow-2xs transition"
-            >
-              <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
-              View Live URL
-            </a>
+            <div className="flex items-center gap-2">
+              <a
+                href={item.published_url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center px-3.5 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-medium hover:bg-blue-100 shadow-2xs transition"
+              >
+                <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                View Live URL
+              </a>
+              {publications[0]?.jsonld_verified && publications[0]?.canonical_verified ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Live & Schema Verified
+                </span>
+              ) : publications[0]?.status === "running" ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-700 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                  <Clock className="w-3 h-3 text-blue-600 animate-pulse" /> Verifying Live Status
+                </span>
+              ) : null}
+            </div>
           )}
         </div>
       </div>
@@ -344,6 +392,18 @@ export default function ContentWorkspacePage({
         >
           <Layers className="w-3.5 h-3.5" />
           Grounding Brief
+        </button>
+
+        <button
+          onClick={() => setActiveTab("publications")}
+          className={`px-4 py-2.5 border-b-2 transition flex items-center gap-1.5 ${
+            activeTab === "publications"
+              ? "border-slate-900 text-slate-900 font-semibold"
+              : "border-transparent text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          <Globe className="w-3.5 h-3.5" />
+          Publications & Verification ({publications.length})
         </button>
       </div>
 
@@ -704,6 +764,99 @@ export default function ContentWorkspacePage({
         </div>
       )}
 
+      {/* TAB 5: PUBLICATIONS */}
+      {activeTab === "publications" && (
+        <div className="space-y-4">
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+            <h3 className="text-sm font-semibold text-slate-900 mb-1">Publications & Verification History</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Real-time audit records of CMS syncs, HTTP 200 health checks, canonical URL validation, and Schema.org JSON-LD structured data.
+            </p>
+
+            {publications.length === 0 ? (
+              <div className="text-center py-10 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                <Globe className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+                <h4 className="text-xs font-semibold text-slate-700">No Publications Recorded</h4>
+                <p className="text-xs text-slate-500 mt-1">
+                  Once this draft version is approved, click &quot;Publish Content&quot; to deploy to your CMS.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-500 font-medium">
+                      <th className="pb-2.5">Live Published URL</th>
+                      <th className="pb-2.5">Job Status</th>
+                      <th className="pb-2.5">HTTP Code</th>
+                      <th className="pb-2.5">Canonical Link</th>
+                      <th className="pb-2.5">JSON-LD Schema</th>
+                      <th className="pb-2.5">Published At</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {publications.map((pub) => (
+                      <tr key={pub.id} className="hover:bg-slate-50 transition">
+                        <td className="py-3 max-w-xs truncate font-mono">
+                          {pub.url ? (
+                            <a
+                              href={pub.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-blue-600 hover:underline inline-flex items-center gap-1"
+                            >
+                              <span className="truncate">{pub.url}</span>
+                              <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                            </a>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                        <td className="py-3">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase ${
+                              pub.status === "succeeded"
+                                ? "bg-emerald-100 text-emerald-800"
+                                : pub.status === "running"
+                                ? "bg-blue-100 text-blue-800"
+                                : "bg-rose-100 text-rose-800"
+                            }`}
+                          >
+                            {pub.status}
+                          </span>
+                        </td>
+                        <td className="py-3 font-mono text-slate-700">{pub.http_status || "—"}</td>
+                        <td className="py-3">
+                          {pub.canonical_verified ? (
+                            <span className="text-emerald-600 font-medium flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Verified
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">Pending</span>
+                          )}
+                        </td>
+                        <td className="py-3">
+                          {pub.jsonld_verified ? (
+                            <span className="text-emerald-600 font-medium flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Article Schema
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">Pending</span>
+                          )}
+                        </td>
+                        <td className="py-3 text-slate-500">
+                          {pub.published_at ? new Date(pub.published_at).toLocaleString() : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Approval Decision Modal */}
       {showApprovalModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
@@ -798,6 +951,117 @@ export default function ContentWorkspacePage({
                     <Check className="w-3.5 h-3.5" />
                   )}
                   Confirm Decision
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Publish Modal */}
+      {showPublishModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-200">
+            <h3 className="text-lg font-semibold text-slate-900">Publish Content Item</h3>
+            <p className="text-xs text-slate-500 mt-0.5 mb-4">
+              Select an approved destination target. Footnote automatically embeds JSON-LD schema and verifies live URL health.
+            </p>
+
+            {/* Approval Gate status indicator */}
+            <div
+              className={`p-3 rounded-xl border mb-4 text-xs ${
+                isApproved
+                  ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                  : "bg-amber-50 border-amber-200 text-amber-800"
+              }`}
+            >
+              <div className="font-semibold flex items-center gap-1.5 mb-0.5">
+                {isApproved ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-amber-600" />
+                )}
+                {isApproved ? "Approval Gate: Signed Off" : "Approval Gate: Not Approved"}
+              </div>
+              <p className="opacity-90">
+                {isApproved
+                  ? "Current draft version has received formal approval. Safe to publish."
+                  : "This draft version has not received an approved signoff. Publishing is blocked by hard security gate."}
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Destination Target</label>
+                {loadingTargets ? (
+                  <div className="text-xs text-slate-400 py-2">Loading configured targets…</div>
+                ) : publishTargets.length === 0 ? (
+                  <div className="text-xs text-amber-700 bg-amber-50 p-2.5 rounded-lg border border-amber-200">
+                    No publishing targets configured yet. Please configure WordPress or Feeds in website settings first.
+                  </div>
+                ) : (
+                  <select
+                    value={selectedTargetId}
+                    onChange={(e) => setSelectedTargetId(e.target.value)}
+                    className="w-full text-xs px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                  >
+                    {publishTargets.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name || t.kind.toUpperCase()} ({t.kind}) {t.is_default ? "— Default" : ""}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Publication Status</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPostStatus("publish")}
+                    className={`px-3 py-2 text-xs font-medium rounded-lg border transition ${
+                      postStatus === "publish"
+                        ? "bg-slate-900 text-white border-slate-900"
+                        : "bg-white text-slate-700 border-slate-200"
+                    }`}
+                  >
+                    Publish Live
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPostStatus("draft")}
+                    className={`px-3 py-2 text-xs font-medium rounded-lg border transition ${
+                      postStatus === "draft"
+                        ? "bg-slate-900 text-white border-slate-900"
+                        : "bg-white text-slate-700 border-slate-200"
+                    }`}
+                  >
+                    Save as CMS Draft
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowPublishModal(false)}
+                  className="px-3 py-1.5 text-xs text-slate-600 hover:text-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={executePublish}
+                  disabled={!isApproved || actionLoading === "publish" || publishTargets.length === 0}
+                  className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg disabled:opacity-50 transition flex items-center gap-1.5"
+                >
+                  {actionLoading === "publish" ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Send className="w-3.5 h-3.5" />
+                  )}
+                  Execute Publication
                 </button>
               </div>
             </div>

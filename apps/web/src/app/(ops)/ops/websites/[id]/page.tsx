@@ -18,6 +18,7 @@ import BrandProfileForm from "../../../../../components/BrandProfileForm";
 import CompetitorsPanel from "../../../../../components/CompetitorsPanel";
 import DemoBadge from "../../../../../components/DemoBadge";
 import PersonasPanel from "../../../../../components/PersonasPanel";
+import PublishTargetsPanel from "../../../../../components/PublishTargetsPanel";
 import SetupChecklist from "../../../../../components/SetupChecklist";
 import { formatDateTime, pct, statusBadgeClass, statusLabel } from "../../../../../lib/ui";
 
@@ -230,16 +231,7 @@ export default function WebsiteDetailPage() {
 
       {/* Publishing */}
       <section id="publishing" className={sectionCard + " p-6"}>
-        <div className="flex items-center justify-between">
-          <h2 className="font-medium text-slate-900">Publishing</h2>
-          <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
-            Not configured
-          </span>
-        </div>
-        <p className="text-sm text-slate-500 mt-2">
-          WordPress and static-feeds publishing are planned, not configured yet. When connected, nothing is published
-          without an approved version of the content.
-        </p>
+        <PublishTargetsPanel clientId={clientId} />
       </section>
     </div>
   );
