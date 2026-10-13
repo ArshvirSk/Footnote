@@ -19,6 +19,10 @@ from services.api.app.config import settings
 from services.api.app.crypto import decrypt_credentials
 from services.api.app.db import engine
 from services.api.app.logging import get_logger
+from services.workers.app.cms_adapters import (
+    GhostPublishClient,
+    WebflowPublishClient,
+)
 from services.workers.app.feeds_builder import FEEDS_BUILD_BASE, FeedsBuilder
 from services.workers.app.wordpress_client import (
     WordPressPublishClient,
@@ -218,6 +222,37 @@ async def run_publisher(ctx: dict[str, Any], draft_id: str, client_id: str) -> d
             builder = FeedsBuilder(client_id)
             build_summary = await builder.build()
             logger.info("feeds_publish_completed", live_url=live_url, build_summary=build_summary)
+
+        elif target_kind == "webflow":
+            api_token = config.get("api_token") or config.get("token") or ""
+            collection_id = config.get("collection_id") or ""
+            wf_client = WebflowPublishClient(
+                api_token=api_token,
+                collection_id=collection_id,
+                site_domain=config.get("custom_domain") or client_domain,
+            )
+            wf_res = await wf_client.publish_item(
+                title=title,
+                body_md=body_md,
+                brand_name=client_name,
+            )
+            external_id = wf_res["external_id"]
+            live_url = wf_res["url"]
+
+        elif target_kind == "ghost":
+            admin_url = config.get("admin_api_url") or config.get("url") or f"https://{client_domain}"
+            admin_key = config.get("admin_api_key") or config.get("key") or ""
+            ghost_client = GhostPublishClient(
+                admin_api_url=admin_url,
+                admin_api_key=admin_key,
+            )
+            ghost_res = await ghost_client.publish_post(
+                title=title,
+                body_md=body_md,
+                brand_name=client_name,
+            )
+            external_id = ghost_res["external_id"]
+            live_url = ghost_res["url"]
 
         elif target_kind == "webhook":
             webhook_url = config.get("webhook_url") or config.get("url")
