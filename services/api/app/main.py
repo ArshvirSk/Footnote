@@ -21,6 +21,7 @@ from services.api.app.routes import (
     gaps,
     health,
     integrations,
+    memos,
     outreach,
     prompts,
     publishing,
@@ -92,3 +93,4 @@ app.include_router(analytics.router, prefix="/api/v1")
 app.include_router(refresh.router, prefix="/api/v1")
 app.include_router(third_party.router, prefix="/api/v1")
 app.include_router(outreach.router, prefix="/api/v1")
+app.include_router(memos.router, prefix="/api/v1")
