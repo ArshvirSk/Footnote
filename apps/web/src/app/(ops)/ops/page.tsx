@@ -9,8 +9,10 @@ import {
   setSelectedClientId,
   websites,
   reportsApi,
+  integrationsApi,
   type ClientSummary,
   type WebsiteDashboard,
+  type IntegrationStatus,
 } from "../../../lib/api";
 import DemoBadge from "../../../components/DemoBadge";
 import MetricCard from "../../../components/MetricCard";
@@ -21,13 +23,20 @@ export default function OpsDashboard() {
   const [list, setList] = useState<ClientSummary[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [dashboard, setDashboard] = useState<WebsiteDashboard | null>(null);
+  const [integrations, setIntegrations] = useState<IntegrationStatus[]>([]);
+  const [connectingDemo, setConnectingDemo] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
   const loadDashboard = useCallback(async (clientId: string) => {
     try {
-      setDashboard(await websites.dashboard(clientId));
+      const [dash, integ] = await Promise.all([
+        websites.dashboard(clientId),
+        integrationsApi.getStatus(clientId).catch(() => []),
+      ]);
+      setDashboard(dash);
+      setIntegrations(integ);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load dashboard");
@@ -324,9 +333,39 @@ export default function OpsDashboard() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-600">Google Search Console / GA4</span>
-                    <span className="text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded-full px-2 py-0.5 font-medium">
-                      Not connected. Planned.
-                    </span>
+                    {integrations.some((i) => i.status === "active") ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5 font-medium flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          Connected &amp; Synced
+                        </span>
+                        <Link
+                          href="/ops/analytics"
+                          className="text-[11px] font-semibold text-blue-600 hover:underline"
+                        >
+                          Analytics →
+                        </Link>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={async () => {
+                          if (!selected) return;
+                          try {
+                            setConnectingDemo(true);
+                            await integrationsApi.connectDemo(selected);
+                            await loadDashboard(selected);
+                          } catch (err: any) {
+                            setError(err?.message || "Failed to connect demo integrations");
+                          } finally {
+                            setConnectingDemo(false);
+                          }
+                        }}
+                        disabled={connectingDemo}
+                        className="text-xs text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-full px-2.5 py-0.5 font-medium transition-colors disabled:opacity-50"
+                      >
+                        {connectingDemo ? "Connecting..." : "Connect Demo (Live GSC)"}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>

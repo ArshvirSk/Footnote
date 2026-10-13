@@ -1431,3 +1431,77 @@ export const reportsApi = {
     `/api/v1/reports/${reportId}/export?format=${format}`,
 };
 
+export interface SearchSummary {
+  client_id: string;
+  days: number;
+  total_clicks: number;
+  total_impressions: number;
+  average_ctr: number;
+  average_position: number;
+  total_aio_impressions: number;
+  total_sessions: number;
+  total_ai_sessions: number;
+  ai_session_share_pct: number;
+  ai_engaged_sessions: number;
+  ai_conversions: number;
+  estimated_referral_value_usd: number;
+  attribution_disclaimer: string;
+}
+
+export interface SearchTimeseriesPoint {
+  day: string;
+  clicks: number;
+  impressions: number;
+  aio_impressions: number;
+  ai_sessions: number;
+  total_sessions: number;
+}
+
+export interface AIReferrerBreakdown {
+  source: string;
+  engine: string;
+  sessions: number;
+  engaged_sessions: number;
+  conversions: number;
+  share_of_ai_pct: number;
+}
+
+export interface TopSearchQuery {
+  query: string;
+  page?: string | null;
+  clicks: number;
+  impressions: number;
+  position: number;
+  is_tracked_prompt: boolean;
+  prompt_id?: string | null;
+}
+
+export interface IntegrationStatus {
+  provider: string;
+  account_ref?: string | null;
+  status: string;
+  last_synced_at?: string | null;
+  sync_status: string;
+  sync_error?: string | null;
+}
+
+export const searchAnalyticsApi = {
+  getSummary: (clientId: string, days: number = 30) =>
+    api.get<SearchSummary>(`/clients/${clientId}/analytics/search/summary?days=${days}`),
+  getTimeseries: (clientId: string, days: number = 30) =>
+    api.get<SearchTimeseriesPoint[]>(`/clients/${clientId}/analytics/search/timeseries?days=${days}`),
+  getAIReferrals: (clientId: string, days: number = 30) =>
+    api.get<AIReferrerBreakdown[]>(`/clients/${clientId}/analytics/search/ai-referrals?days=${days}`),
+  getQueries: (clientId: string, days: number = 30, limit: number = 25) =>
+    api.get<TopSearchQuery[]>(`/clients/${clientId}/analytics/search/queries?days=${days}&limit=${limit}`),
+  syncNow: (clientId: string, days: number = 14) =>
+    api.post<{ status: string; client_id: string; synced_days: number }>(`/clients/${clientId}/analytics/search/sync-now?days=${days}`, {}),
+};
+
+export const integrationsApi = {
+  getStatus: (clientId: string) =>
+    api.get<IntegrationStatus[]>(`/clients/${clientId}/integrations/status`),
+  connectDemo: (clientId: string) =>
+    api.post<{ status: string; details: any }>(`/clients/${clientId}/integrations/connect-demo`, {}),
+};
+

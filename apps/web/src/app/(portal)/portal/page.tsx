@@ -2,19 +2,26 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, Clock, Eye, FileDown, FileText, Loader2, MessageSquare, Quote, ShieldAlert, Sparkles } from "lucide-react";
-import { PortalDashboard, portalApi, reportsApi, getSelectedClientId } from "@/lib/api";
+import { ArrowRight, CheckCircle2, Clock, Eye, FileDown, FileText, Loader2, MessageSquare, Quote, Search, ShieldAlert, Sparkles } from "lucide-react";
+import { PortalDashboard, portalApi, reportsApi, searchAnalyticsApi, getSelectedClientId, type SearchSummary } from "@/lib/api";
 
 export default function PortalOverview() {
   const [dashboard, setDashboard] = useState<PortalDashboard | null>(null);
+  const [searchSummary, setSearchSummary] = useState<SearchSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     const cid = getSelectedClientId() || undefined;
-    portalApi.getDashboard(cid)
-      .then((data) => setDashboard(data))
+    Promise.all([
+      portalApi.getDashboard(cid),
+      cid ? searchAnalyticsApi.getSummary(cid, 30).catch(() => null) : Promise.resolve(null),
+    ])
+      .then(([data, search]) => {
+        setDashboard(data);
+        setSearchSummary(search);
+      })
       .catch((err) => setError(err.message || "Failed to load dashboard"))
       .finally(() => setLoading(false));
   }, []);
@@ -158,6 +165,62 @@ export default function PortalOverview() {
           </Link>
         </div>
       </div>
+
+      {/* Search & Generative AI Impact */}
+      {searchSummary && (
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-2xs p-6 md:p-8">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <div>
+              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <Search className="w-5 h-5 text-blue-600" />
+                Organic Search Performance &amp; AI Referral Traffic
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Google Search Console organic performance and verified visitors arriving from generative AI engines.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                Last 30 Days
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="p-4 rounded-xl bg-slate-50/70 border border-slate-200/60">
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Organic Clicks</span>
+              <div className="text-2xl font-black text-slate-900 mt-1">
+                {searchSummary.total_clicks.toLocaleString()}
+              </div>
+              <span className="text-[11px] text-slate-400">Google Search</span>
+            </div>
+            <div className="p-4 rounded-xl bg-slate-50/70 border border-slate-200/60">
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Search Impressions</span>
+              <div className="text-2xl font-black text-slate-900 mt-1">
+                {searchSummary.total_impressions.toLocaleString()}
+              </div>
+              <span className="text-[11px] text-slate-400">Avg Pos #{searchSummary.average_position}</span>
+            </div>
+            <div className="p-4 rounded-xl bg-purple-50/60 border border-purple-200/60">
+              <span className="text-[11px] font-semibold text-purple-700 uppercase tracking-wider">AI Referrals</span>
+              <div className="text-2xl font-black text-purple-900 mt-1">
+                {searchSummary.total_ai_sessions.toLocaleString()}
+              </div>
+              <span className="text-[11px] text-purple-600 font-medium">{searchSummary.ai_session_share_pct}% of total traffic</span>
+            </div>
+            <div className="p-4 rounded-xl bg-emerald-50/60 border border-emerald-200/60">
+              <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider">Attributed Value</span>
+              <div className="text-2xl font-black text-emerald-900 mt-1">
+                ${searchSummary.estimated_referral_value_usd.toLocaleString()}
+              </div>
+              <span className="text-[11px] text-emerald-600 font-medium">Estimated Pipeline</span>
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-400 italic mt-3">
+            * Note: Conversational AI referrers typically undercount due to private in-app webviews and cross-origin header stripping.
+          </p>
+        </div>
+      )}
 
       {/* Recent Engine Mentions */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs p-6 md:p-8">

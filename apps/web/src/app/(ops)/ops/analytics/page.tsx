@@ -16,6 +16,13 @@ import {
   Award,
   AlertCircle,
   Cpu,
+  Search,
+  Share2,
+  Compass,
+  MousePointer,
+  CheckCircle2,
+  BarChart3,
+  Info,
 } from "lucide-react";
 import {
   Area,
@@ -34,12 +41,17 @@ import {
   getSelectedClientId,
   getDefaultClientId,
   analyticsApi,
+  searchAnalyticsApi,
   websites,
   type KPIOverview,
   type TimeseriesPoint,
   type WonGap,
   type EngineShare,
   type ClientSummary,
+  type SearchSummary,
+  type SearchTimeseriesPoint,
+  type AIReferrerBreakdown,
+  type TopSearchQuery,
 } from "@/lib/api";
 import { formatDateTime } from "@/lib/ui";
 
@@ -59,6 +71,12 @@ export default function AnalyticsPage() {
   const [timeseries, setTimeseries] = useState<TimeseriesPoint[]>([]);
   const [wonGaps, setWonGaps] = useState<WonGap[]>([]);
   const [engineShare, setEngineShare] = useState<EngineShare[]>([]);
+  const [searchSummary, setSearchSummary] = useState<SearchSummary | null>(null);
+  const [searchTimeseries, setSearchTimeseries] = useState<SearchTimeseriesPoint[]>([]);
+  const [aiReferrals, setAiReferrals] = useState<AIReferrerBreakdown[]>([]);
+  const [searchQueries, setSearchQueries] = useState<TopSearchQuery[]>([]);
+  const [syncingSearch, setSyncingSearch] = useState<boolean>(false);
+  const [syncSuccessMsg, setSyncSuccessMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,16 +91,24 @@ export default function AnalyticsPage() {
       try {
         setRefreshing(true);
         setError(null);
-        const [kpis, ts, gaps, engines] = await Promise.all([
+        const [kpis, ts, gaps, engines, searchSum, searchTs, aiRefs, topQ] = await Promise.all([
           analyticsApi.getOverview(cid, selectedDays),
           analyticsApi.getTimeseries(cid, selectedDays),
           analyticsApi.getWonGaps(cid, selectedDays),
           analyticsApi.getEngineShare(cid, selectedDays),
+          searchAnalyticsApi.getSummary(cid, selectedDays).catch(() => null),
+          searchAnalyticsApi.getTimeseries(cid, selectedDays).catch(() => []),
+          searchAnalyticsApi.getAIReferrals(cid, selectedDays).catch(() => []),
+          searchAnalyticsApi.getQueries(cid, selectedDays, 15).catch(() => []),
         ]);
         setOverview(kpis);
         setTimeseries(ts);
         setWonGaps(gaps);
         setEngineShare(engines);
+        setSearchSummary(searchSum);
+        setSearchTimeseries(searchTs);
+        setAiReferrals(aiRefs);
+        setSearchQueries(topQ);
       } catch (err: any) {
         setError(err?.message || "Failed to load live analytics data");
       } finally {
@@ -92,6 +118,21 @@ export default function AnalyticsPage() {
     },
     []
   );
+
+  const handleSyncSearch = async () => {
+    if (!clientId) return;
+    try {
+      setSyncingSearch(true);
+      setSyncSuccessMsg(null);
+      await searchAnalyticsApi.syncNow(clientId, 14);
+      setSyncSuccessMsg("GSC & GA4 analytics synchronized successfully.");
+      await loadData(clientId, days);
+    } catch (err: any) {
+      setError(err?.message || "Failed to synchronize search data");
+    } finally {
+      setSyncingSearch(false);
+    }
+  };
 
   const initClient = useCallback(async () => {
     try {
@@ -584,6 +625,194 @@ export default function AnalyticsPage() {
             </table>
           </div>
         )}
+      </div>
+
+      {/* Google Search Console & Generative AI Referrals Engine */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-6 md:p-8 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
+                <Search className="w-4 h-4" />
+              </div>
+              <h3 className="font-bold text-slate-900 text-lg">
+                Google Search &amp; Generative AI Referrals
+              </h3>
+            </div>
+            <p className="text-xs text-slate-500 mt-1 max-w-2xl">
+              Live measurement of organic Google search visibility, AI Overviews impressions, and visitors attributed to conversational AI engines.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSyncSearch}
+              disabled={syncingSearch}
+              className="inline-flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-50 rounded-lg shadow-xs transition-colors"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncingSearch ? "animate-spin" : ""}`} />
+              {syncingSearch ? "Syncing..." : "Sync Search Data"}
+            </button>
+          </div>
+        </div>
+
+        {syncSuccessMsg && (
+          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{syncSuccessMsg}</span>
+          </div>
+        )}
+
+        {/* Search Performance KPI Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          <div className="p-4 rounded-xl bg-slate-50/70 border border-slate-200/60">
+            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Organic Clicks</span>
+            <div className="text-2xl font-black text-slate-900 mt-1">
+              {searchSummary ? searchSummary.total_clicks.toLocaleString() : "—"}
+            </div>
+            <span className="text-[11px] text-slate-400">Google Search Console</span>
+          </div>
+
+          <div className="p-4 rounded-xl bg-slate-50/70 border border-slate-200/60">
+            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Impressions</span>
+            <div className="text-2xl font-black text-slate-900 mt-1">
+              {searchSummary ? searchSummary.total_impressions.toLocaleString() : "—"}
+            </div>
+            <span className="text-[11px] text-slate-400">Avg Pos {searchSummary ? searchSummary.average_position : "—"}</span>
+          </div>
+
+          <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-200/60">
+            <span className="text-[11px] font-semibold text-blue-700 uppercase tracking-wider">AI Overviews</span>
+            <div className="text-2xl font-black text-blue-900 mt-1">
+              {searchSummary ? searchSummary.total_aio_impressions.toLocaleString() : "—"}
+            </div>
+            <span className="text-[11px] text-blue-600 font-medium">AIO Search Queries</span>
+          </div>
+
+          <div className="p-4 rounded-xl bg-purple-50/50 border border-purple-200/60">
+            <span className="text-[11px] font-semibold text-purple-700 uppercase tracking-wider">AI Referrals</span>
+            <div className="text-2xl font-black text-purple-900 mt-1">
+              {searchSummary ? searchSummary.total_ai_sessions.toLocaleString() : "—"}
+            </div>
+            <span className="text-[11px] text-purple-600 font-medium">{searchSummary ? `${searchSummary.ai_session_share_pct}%` : "—"} of total traffic</span>
+          </div>
+
+          <div className="p-4 rounded-xl bg-slate-50/70 border border-slate-200/60">
+            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Engaged AI Sessions</span>
+            <div className="text-2xl font-black text-slate-900 mt-1">
+              {searchSummary ? searchSummary.ai_engaged_sessions.toLocaleString() : "—"}
+            </div>
+            <span className="text-[11px] text-slate-400">{searchSummary ? `${searchSummary.ai_conversions} conversions` : "—"}</span>
+          </div>
+
+          <div className="p-4 rounded-xl bg-emerald-50/50 border border-emerald-200/60">
+            <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider">Estimated Value</span>
+            <div className="text-2xl font-black text-emerald-900 mt-1">
+              ${searchSummary ? searchSummary.estimated_referral_value_usd.toLocaleString() : "0"}
+            </div>
+            <span className="text-[11px] text-emerald-600 font-medium">Attributed Pipeline</span>
+          </div>
+        </div>
+
+        {/* Disclaimer Caveat Banner */}
+        <div className="flex items-start gap-2.5 p-3.5 bg-amber-50/80 border border-amber-200/70 rounded-xl text-xs text-amber-900">
+          <Info className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+          <p className="leading-relaxed">
+            <strong className="font-semibold">Attribution Undercount Caveat:</strong> {searchSummary?.attribution_disclaimer || "AI referrals typically undercount due to in-app webviews and referrer stripping."}
+          </p>
+        </div>
+
+        {/* Timeseries Dual Chart */}
+        <div className="bg-slate-50/60 border border-slate-200/70 rounded-xl p-5">
+          <h4 className="text-sm font-bold text-slate-900 mb-4">
+            Organic Search Clicks vs. AI Referral Visits
+          </h4>
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={searchTimeseries} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="clicksGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="aiGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="day" stroke="#94a3b8" fontSize={11} tickFormatter={(val) => val.slice(5)} />
+                <YAxis stroke="#94a3b8" fontSize={11} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: "#0f172a", borderRadius: "8px", border: "none", color: "#fff", fontSize: "12px" }}
+                />
+                <Legend />
+                <Area type="monotone" dataKey="clicks" name="GSC Organic Clicks" stroke="#3b82f6" fillOpacity={1} fill="url(#clicksGrad)" />
+                <Area type="monotone" dataKey="ai_sessions" name="GA4 AI Referral Visits" stroke="#8b5cf6" fillOpacity={1} fill="url(#aiGrad)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Bottom Split: AI Referral Engines & Top Organic Queries */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* AI Engines Split */}
+          <div className="border border-slate-200/70 rounded-xl p-5">
+            <h4 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+              <Share2 className="w-4 h-4 text-purple-600" />
+              Generative AI Referral Breakdown
+            </h4>
+            {aiReferrals.length === 0 ? (
+              <p className="text-xs text-slate-400 py-6 text-center">No AI referrers logged in this period.</p>
+            ) : (
+              <div className="space-y-3">
+                {aiReferrals.map((ref, idx) => (
+                  <div key={idx} className="flex items-center justify-between p-3 rounded-lg bg-slate-50/70 border border-slate-200/40 text-xs">
+                    <div>
+                      <span className="font-semibold text-slate-900 capitalize">{ref.engine}</span>
+                      <span className="text-slate-400 ml-1.5 font-mono">({ref.source})</span>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span className="text-slate-600 font-medium">{ref.sessions} sessions</span>
+                      <span className="px-2 py-0.5 rounded-full font-bold bg-purple-100 text-purple-800">
+                        {ref.share_of_ai_pct}%
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Top Organic Queries */}
+          <div className="border border-slate-200/70 rounded-xl p-5">
+            <h4 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+              <Compass className="w-4 h-4 text-blue-600" />
+              Search Queries &amp; AI Prompt Alignment
+            </h4>
+            {searchQueries.length === 0 ? (
+              <p className="text-xs text-slate-400 py-6 text-center">No search queries synchronized yet.</p>
+            ) : (
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {searchQueries.map((q, idx) => (
+                  <div key={idx} className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50/70 border border-slate-200/40 text-xs">
+                    <div className="flex items-center gap-2 max-w-xs truncate">
+                      <span className="font-medium text-slate-900 truncate">{q.query}</span>
+                      {q.is_tracked_prompt && (
+                        <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 font-semibold rounded text-[10px] shrink-0">
+                          Tracked Prompt
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0 text-slate-500 font-mono">
+                      <span>{q.clicks} clicks</span>
+                      <span>Pos #{q.position}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
