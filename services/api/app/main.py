@@ -28,6 +28,7 @@ from services.api.app.routes import (
     prompts,
     publishing,
     refresh,
+    reports,
     research,
     storage,
     third_party,
@@ -100,3 +101,4 @@ app.include_router(third_party.router, prefix="/api/v1")
 app.include_router(outreach.router, prefix="/api/v1")
 app.include_router(memos.router, prefix="/api/v1")
 app.include_router(storage.router, prefix="/api/v1")
+app.include_router(reports.router, prefix="/api/v1")
