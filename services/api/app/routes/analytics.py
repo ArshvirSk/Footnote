@@ -7,7 +7,7 @@ content_items.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -74,11 +74,11 @@ class EngineShare(BaseModel):
 
 # ───────────── Helpers ─────────────
 
-def _date_range(days: int) -> tuple[str, str]:
-    """Return (start_date_iso, end_date_iso) for the last N days."""
+def _date_range(days: int) -> tuple[date, date]:
+    """Return (start_date, end_date) as date objects for the last N days."""
     end = datetime.now(UTC).date()
     start = end - timedelta(days=days)
-    return start.isoformat(), end.isoformat()
+    return start, end
 
 
 # ───────────── Routes ─────────────
@@ -101,7 +101,7 @@ async def analytics_overview(
             FROM content_items
             WHERE client_id = :cid
               AND status = 'published'
-              AND published_at >= :start::date
+              AND published_at >= :start
         """),
         {"cid": str(client_id), "start": start},
     )
@@ -114,7 +114,7 @@ async def analytics_overview(
             FROM gaps
             WHERE client_id = :cid
               AND status = 'won'
-              AND closed_at >= :start::date
+              AND closed_at >= :start
         """),
         {"cid": str(client_id), "start": start},
     )
@@ -128,7 +128,7 @@ async def analytics_overview(
             JOIN answers a ON a.id = bm.answer_id
             WHERE bm.client_id = :cid
               AND bm.entity_kind = 'brand'
-              AND a.collected_at >= :start::date
+              AND a.collected_at >= :start
         """),
         {"cid": str(client_id), "start": start},
     )
@@ -142,7 +142,7 @@ async def analytics_overview(
               COALESCE(SUM(total_citations), 0) AS all_total
             FROM daily_metrics
             WHERE client_id = :cid
-              AND day >= :start::date AND day <= :end::date
+              AND day >= :start AND day <= :end
         """),
         {"cid": str(client_id), "start": start, "end": end},
     )
@@ -185,8 +185,8 @@ async def analytics_timeseries(
                 FROM brand_mentions bm
                 JOIN answers a ON a.id = bm.answer_id
                 WHERE bm.client_id = :cid
-                  AND a.collected_at >= :start::date
-                  AND a.collected_at <= :end::date
+                  AND a.collected_at >= :start
+                  AND a.collected_at <= :end
                 GROUP BY a.collected_at::date
             ),
             share AS (
@@ -197,7 +197,7 @@ async def analytics_timeseries(
                          ELSE 0 END AS citation_share
                 FROM daily_metrics
                 WHERE client_id = :cid
-                  AND day >= :start::date AND day <= :end::date
+                  AND day >= :start AND day <= :end
             )
             SELECT
                 COALESCE(d.day, s.day) AS day,
@@ -262,7 +262,7 @@ async def analytics_won_gaps(
                 AND ci2.status = 'published'
             WHERE g.client_id = :cid
               AND g.status = 'won'
-              AND g.closed_at >= :start::date
+              AND g.closed_at >= :start
             ORDER BY g.closed_at DESC
         """),
         {"cid": str(client_id), "start": start},
@@ -309,7 +309,7 @@ async def analytics_engine_share(
                 SUM(prompts_tracked) AS prompts_tracked
             FROM daily_metrics
             WHERE client_id = :cid
-              AND day >= :start::date AND day <= :end::date
+              AND day >= :start AND day <= :end
             GROUP BY engine
             ORDER BY mention_rate DESC
         """),

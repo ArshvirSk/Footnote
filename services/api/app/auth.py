@@ -56,6 +56,10 @@ class AuthUser(BaseModel):
     role: MemberRole | None = None
     client_ids: list[UUID] = []
 
+    @property
+    def id(self) -> UUID:
+        return self.user_id
+
 
 async def _decode_jwt(token: str) -> dict[str, str | int | bool]:
     """Decode and verify a Supabase JWT."""
@@ -170,14 +174,28 @@ def require_portal_role() -> Callable[..., Awaitable[AuthUser]]:
     return require_roles(*PORTAL_ROLES)
 
 
-async def has_client_access(user: AuthUser, client_id: UUID, db: AsyncSession) -> bool:
+async def has_client_access(first: Any, second: Any, db: AsyncSession) -> bool:
     """Check if the user can access a specific client. Used for API-level checks
-    on top of RLS (defense in depth)."""
-    if user.role in INTERNAL_ROLES and user.org_id:
+    on top of RLS (defense in depth). Accepts either (user, client_id, db) or (client_id, user, db)."""
+    if isinstance(first, AuthUser):
+        user: AuthUser = first
+        client_id = second
+    else:
+        client_id = first
+        user = second
+
+    if hasattr(user, "role") and user.role in INTERNAL_ROLES and user.org_id:
         result = await db.execute(
             text("SELECT 1 FROM clients WHERE id = :cid AND org_id = :oid"),
             {"cid": str(client_id), "oid": str(user.org_id)},
         )
-        return result.first() is not None
+        allowed = result.first() is not None
+        if not allowed:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+        return True
 
-    return client_id in user.client_ids
+    cid_uuid = UUID(str(client_id)) if not isinstance(client_id, UUID) else client_id
+    allowed = hasattr(user, "client_ids") and cid_uuid in user.client_ids
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    return True

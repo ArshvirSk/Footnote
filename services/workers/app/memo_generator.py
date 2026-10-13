@@ -39,6 +39,7 @@ async def generate_client_memo(
     period_end = now.date()
     period_start = period_end - timedelta(days=period_days)
     prev_start = period_start - timedelta(days=period_days)
+    start_dt = datetime.combine(period_start, datetime.min.time(), tzinfo=UTC)
 
     async with AsyncSession(engine) as session:
         # ── 1. Client info ──
@@ -64,7 +65,7 @@ async def generate_client_memo(
                 WHERE client_id = :cid
                   AND day >= :start AND day <= :end
             """),
-            {"cid": client_id, "start": period_start.isoformat(), "end": period_end.isoformat()},
+            {"cid": client_id, "start": period_start, "end": period_end},
         )
         vis = vis_res.one()
         mention_rate = float(vis[0] or 0)
@@ -84,7 +85,7 @@ async def generate_client_memo(
                 WHERE client_id = :cid
                   AND day >= :start AND day < :end
             """),
-            {"cid": client_id, "start": prev_start.isoformat(), "end": period_start.isoformat()},
+            {"cid": client_id, "start": prev_start, "end": period_start},
         )
         prev = prev_res.one()
         prev_mention = float(prev[0] or 0)
@@ -107,7 +108,7 @@ async def generate_client_memo(
                 GROUP BY engine
                 ORDER BY AVG(mention_rate) DESC
             """),
-            {"cid": client_id, "start": period_start.isoformat(), "end": period_end.isoformat()},
+            {"cid": client_id, "start": period_start, "end": period_end},
         )
         engines = eng_res.all()
 
@@ -118,7 +119,7 @@ async def generate_client_memo(
                 WHERE client_id = :cid AND status = 'won'
                   AND closed_at >= :start
             """),
-            {"cid": client_id, "start": period_start.isoformat()},
+            {"cid": client_id, "start": start_dt},
         )
         won_gaps = gap_res.scalar_one_or_none() or 0
 
@@ -135,7 +136,7 @@ async def generate_client_memo(
                 WHERE client_id = :cid AND status = 'published'
                   AND published_at >= :start
             """),
-            {"cid": client_id, "start": period_start.isoformat()},
+            {"cid": client_id, "start": start_dt},
         )
         content_shipped = content_res.scalar_one_or_none() or 0
 
@@ -149,7 +150,7 @@ async def generate_client_memo(
                 WHERE client_id = :cid
                   AND published_at >= :start
             """),
-            {"cid": client_id, "start": period_start.isoformat()},
+            {"cid": client_id, "start": start_dt},
         )
         vr = verify_res.one()
         verified = int(vr[0] or 0)
@@ -169,7 +170,7 @@ async def generate_client_memo(
                 ORDER BY count(bm.id) DESC
                 LIMIT 5
             """),
-            {"cid": client_id, "start": period_start.isoformat()},
+            {"cid": client_id, "start": start_dt},
         )
         competitors = comp_res.all()
 
@@ -190,7 +191,7 @@ async def generate_client_memo(
 
         estimated_value = round(brand_citations * 2.50, 2)
 
-        draft_md = f"""# Executive Monthly Report: {client_name}
+        draft_md = f"""# Executive Monthly Memo: {client_name}
 **Period**: {period_start} → {period_end} ({period_days} days)
 **Generated**: {now.strftime('%B %d, %Y')}
 
@@ -266,9 +267,9 @@ async def generate_client_memo(
             {
                 "id": memo_id,
                 "cid": client_id,
-                "title": f"Monthly Report: {period_start} → {period_end}",
-                "pstart": period_start.isoformat(),
-                "pend": period_end.isoformat(),
+                "title": f"Executive Monthly Memo: {client_name} ({period_start} → {period_end})",
+                "pstart": period_start,
+                "pend": period_end,
                 "metrics": json.dumps(metrics_json),
                 "draft": draft_md,
             },
@@ -296,9 +297,11 @@ async def generate_client_memo(
     )
 
     return {
+        "id": memo_id,
         "memo_id": memo_id,
         "approval_id": approval_id,
-        "title": f"Monthly Report: {period_start} → {period_end}",
+        "title": f"Executive Monthly Memo: {client_name} ({period_start} → {period_end})",
+        "draft_md": draft_md,
         "metrics": metrics_json,
         "status": "draft",
     }

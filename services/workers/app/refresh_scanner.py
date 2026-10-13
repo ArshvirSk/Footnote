@@ -102,8 +102,8 @@ async def scan_client_content(client_id: str | UUID) -> dict[str, Any]:
                     {
                         "cid": client_id,
                         "pids": prompt_ids,
-                        "recent_start": (now - timedelta(days=SCAN_WINDOW_DAYS)).isoformat(),
-                        "hist_start": (now - timedelta(days=SCAN_WINDOW_DAYS * 2)).isoformat(),
+                        "recent_start": now - timedelta(days=SCAN_WINDOW_DAYS),
+                        "hist_start": now - timedelta(days=SCAN_WINDOW_DAYS * 2),
                     },
                 )
                 cit_row = cit_result.one()
@@ -148,23 +148,24 @@ async def scan_client_content(client_id: str | UUID) -> dict[str, Any]:
             )
 
             # Update content item with computed score and scan timestamp
+            should_refresh = (decay_score > DECAY_THRESHOLD)
             await session.execute(
                 text("""
                     UPDATE content_items
                     SET decay_score = :score,
                         last_scanned_at = :now,
                         status = CASE
-                            WHEN :score > :threshold AND status = 'published' THEN 'refresh_needed'
+                            WHEN :should_refresh AND status = 'published' THEN 'refresh_needed'
                             ELSE status
                         END
                     WHERE id = :id AND client_id = :cid
                 """),
                 {
                     "score": decay_score,
-                    "now": now.isoformat(),
+                    "now": now,
+                    "should_refresh": should_refresh,
                     "id": item_id,
                     "cid": client_id,
-                    "threshold": DECAY_THRESHOLD,
                 },
             )
 
@@ -277,7 +278,7 @@ async def approve_refresh_and_republish(
                 "pid": proposal_id,
                 "cid": client_id,
                 "reviewer": str(reviewer_id) if reviewer_id else None,
-                "now": now.isoformat(),
+                "now": now,
             },
         )
 
@@ -296,7 +297,7 @@ async def approve_refresh_and_republish(
                     "vid": str(proposed_version_id),
                     "cid_item": content_item_id,
                     "cid": client_id,
-                    "now": now.isoformat(),
+                    "now": now,
                 },
             )
 
@@ -310,7 +311,7 @@ async def approve_refresh_and_republish(
                 WHERE id = :item_id AND client_id = :cid
                   AND status = 'refresh_needed'
             """),
-            {"item_id": content_item_id, "cid": client_id, "now": now.isoformat()},
+            {"item_id": content_item_id, "cid": client_id, "now": now},
         )
 
         await session.commit()

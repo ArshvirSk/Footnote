@@ -87,8 +87,8 @@ async def list_refresh_proposals(
             SELECT
                 rp.id, rp.content_item_id, rp.client_id,
                 rp.reason, rp.diff_summary, rp.proposed_version_id,
-                rp.reviewer_id, rp.status, rp.decided_at::text,
-                rp.created_at::text,
+                rp.reviewer_id, rp.status, CAST(rp.decided_at AS text),
+                CAST(rp.created_at AS text),
                 cv.title AS item_title,
                 ci.slug AS item_slug,
                 ci.published_url AS item_published_url,
@@ -135,8 +135,8 @@ async def get_refresh_proposal(
             SELECT
                 rp.id, rp.content_item_id, rp.client_id,
                 rp.reason, rp.diff_summary, rp.proposed_version_id,
-                rp.reviewer_id, rp.status, rp.decided_at::text,
-                rp.created_at::text,
+                rp.reviewer_id, rp.status, CAST(rp.decided_at AS text),
+                CAST(rp.created_at AS text),
                 cv.title AS item_title,
                 ci.slug AS item_slug,
                 ci.published_url AS item_published_url,
@@ -183,7 +183,7 @@ async def decide_refresh_proposal(
         result = await approve_refresh_and_republish(
             proposal_id=proposal_id,
             client_id=client_id,
-            reviewer_id=user.id,
+            reviewer_id=user.user_id,
         )
         if "error" in result:
             raise HTTPException(status.HTTP_404_NOT_FOUND, result["error"])
@@ -203,7 +203,7 @@ async def decide_refresh_proposal(
             "status": new_status,
             "pid": str(proposal_id),
             "cid": str(client_id),
-            "reviewer": str(user.id),
+            "reviewer": str(user.user_id),
         },
     )
     # Also update the corresponding approval
@@ -221,7 +221,7 @@ async def decide_refresh_proposal(
             "status": "rejected" if body.action == "reject" else "pending",
             "pid": str(proposal_id),
             "cid": str(client_id),
-            "reviewer": str(user.id),
+            "reviewer": str(user.user_id),
         },
     )
     await db.commit()

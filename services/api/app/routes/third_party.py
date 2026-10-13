@@ -112,7 +112,7 @@ async def list_third_party_tasks(
             SELECT
                 t.id, t.client_id, t.platform, t.target_url, t.thread_title,
                 t.brief, t.draft, t.assignee, t.status, t.posted_url,
-                t.due_at::text, t.created_at::text, t.updated_at::text
+                CAST(t.due_at AS text), CAST(t.created_at AS text), CAST(t.updated_at AS text)
             FROM third_party_tasks t
             WHERE {where}
             ORDER BY
@@ -163,10 +163,10 @@ async def create_third_party_task(
                 (client_id, platform, target_url, thread_title, brief, assignee, due_at)
             VALUES
                 (:cid, :platform, :target_url, :thread_title, :brief, :assignee,
-                 CASE WHEN :due_at IS NOT NULL THEN :due_at::timestamptz ELSE NULL END)
+                 CAST(:due_at AS timestamptz))
             RETURNING id, client_id, platform, target_url, thread_title, brief,
                       draft, assignee, status, posted_url,
-                      due_at::text, created_at::text, updated_at::text
+                      CAST(due_at AS text), CAST(created_at AS text), CAST(updated_at AS text)
         """),
         {
             "cid": str(client_id),
@@ -206,7 +206,7 @@ async def get_third_party_task(
             SELECT
                 id, client_id, platform, target_url, thread_title,
                 brief, draft, assignee, status, posted_url,
-                due_at::text, created_at::text, updated_at::text
+                CAST(due_at AS text), CAST(created_at AS text), CAST(updated_at AS text)
             FROM third_party_tasks
             WHERE id = :tid AND client_id = :cid
         """),
@@ -274,7 +274,7 @@ async def update_third_party_task(
         updates.append("assignee = :assignee")
         params["assignee"] = str(body.assignee)
     if body.due_at is not None:
-        updates.append("due_at = :due_at::timestamptz")
+        updates.append("due_at = CAST(:due_at AS timestamptz)")
         params["due_at"] = body.due_at
 
     set_clause = ", ".join(updates)
@@ -285,7 +285,7 @@ async def update_third_party_task(
             WHERE id = :tid AND client_id = :cid
             RETURNING id, client_id, platform, target_url, thread_title,
                       brief, draft, assignee, status, posted_url,
-                      due_at::text, created_at::text, updated_at::text
+                      CAST(due_at AS text), CAST(created_at AS text), CAST(updated_at AS text)
         """),
         params,
     )
@@ -322,6 +322,7 @@ async def delete_third_party_task(
 
 
 @router.post("/tasks/{task_id}/generate-draft")
+@router.post("/tasks/{task_id}/draft")
 async def generate_task_draft(
     client_id: UUID,
     task_id: UUID,

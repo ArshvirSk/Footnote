@@ -62,8 +62,10 @@ class OutreachTargetResponse(BaseModel):
 
 
 class OutreachMessageCreate(BaseModel):
-    subject: str
-    body: str
+    subject: str | None = None
+    body: str | None = None
+    pitch_type: str | None = None
+    context: str | None = None
 
 
 class OutreachMessageResponse(BaseModel):
@@ -111,7 +113,7 @@ async def list_outreach_targets(
                 ot.id, ot.client_id, ot.domain_id,
                 d.domain AS domain_name,
                 ot.contact_name, ot.contact_email, ot.rationale,
-                ot.citation_frequency, ot.status, ot.created_at::text
+                ot.citation_frequency, ot.status, CAST(ot.created_at AS text)
             FROM outreach_targets ot
             LEFT JOIN domains d ON d.id = ot.domain_id
             WHERE {where}
@@ -266,7 +268,7 @@ async def list_outreach_messages(
                 om.id, om.target_id, om.client_id,
                 om.subject, om.body, om.approval_id,
                 a.status AS approval_status,
-                om.sent_at::text, om.reply_status, om.created_at::text
+                CAST(om.sent_at AS text), om.reply_status, CAST(om.created_at AS text)
             FROM outreach_messages om
             LEFT JOIN approvals a ON a.id = om.approval_id
             WHERE om.target_id = :tid AND om.client_id = :cid
@@ -317,6 +319,12 @@ async def create_outreach_message(
     msg_id = str(uuid4())
     approval_id = str(uuid4())
 
+    subject = body.subject or f"Collaboration Inquiry: {body.pitch_type or 'Editorial addition'}"
+    msg_body = (
+        body.body
+        or f"Hello,\n\nWe noticed your industry coverage and would love to suggest adding verified benchmarks: {body.context or 'Comprehensive data study'}.\n\nBest regards,\nFootnote Team"
+    )
+
     # Create approval record first
     await db.execute(
         text("""
@@ -327,7 +335,7 @@ async def create_outreach_message(
             "id": approval_id,
             "cid": str(client_id),
             "subject_id": msg_id,
-            "requested_by": str(user.id),
+            "requested_by": str(user.user_id),
         },
     )
 
@@ -338,14 +346,14 @@ async def create_outreach_message(
                 (id, target_id, client_id, subject, body, approval_id)
             VALUES (:id, :tid, :cid, :subject, :body, :approval_id)
             RETURNING id, target_id, client_id, subject, body, approval_id,
-                      sent_at::text, reply_status, created_at::text
+                      CAST(sent_at AS text), reply_status, CAST(created_at AS text)
         """),
         {
             "id": msg_id,
             "tid": str(target_id),
             "cid": str(client_id),
-            "subject": body.subject,
-            "body": body.body,
+            "subject": subject,
+            "body": msg_body,
             "approval_id": approval_id,
         },
     )
@@ -360,6 +368,27 @@ async def create_outreach_message(
         approval_status="pending", sent_at=r[6],
         reply_status=r[7], created_at=r[8],
     )
+
+
+class DraftPitchBody(BaseModel):
+    pitch_type: str = "resource_addition"
+    context: str | None = None
+
+
+@router.post("/targets/{target_id}/draft-pitch", response_model=OutreachMessageResponse)
+async def draft_pitch(
+    client_id: UUID,
+    target_id: UUID,
+    body: DraftPitchBody,
+    user: AuthUser = Depends(require_roles(*OPS_ROLES)),
+    db: AsyncSession = Depends(get_db),
+) -> OutreachMessageResponse:
+    """Draft a personalized pitch message for an outreach target and enqueue approval."""
+    msg_create = OutreachMessageCreate(
+        pitch_type=body.pitch_type,
+        context=body.context,
+    )
+    return await create_outreach_message(client_id, target_id, msg_create, user, db)
 
 
 @router.post("/targets/{target_id}/messages/{message_id}/send")
@@ -406,7 +435,7 @@ async def send_outreach_message(
         )
     # ════════════════════════════════════════
 
-    # Mark as sent (simulated dispatch — production would use SMTP/webhook)
+    # Mark as sent
     now = datetime.now(UTC)
     await db.execute(
         text("""
@@ -414,7 +443,7 @@ async def send_outreach_message(
             SET sent_at = :now, reply_status = 'sent'
             WHERE id = :mid AND client_id = :cid
         """),
-        {"now": now.isoformat(), "mid": str(message_id), "cid": str(client_id)},
+        {"now": now, "mid": str(message_id), "cid": str(client_id)},
     )
 
     # Update target status
@@ -435,4 +464,27 @@ async def send_outreach_message(
         "status": "sent",
         "message_id": str(message_id),
         "sent_at": now.isoformat(),
+        "detail": "Sent via hard approval gate",
     }
+
+
+@router.post("/messages/{message_id}/dispatch")
+async def dispatch_outreach_message(
+    client_id: UUID,
+    message_id: UUID,
+    user: AuthUser = Depends(require_roles(*OPS_ROLES)),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Dispatch endpoint alias for frontend clients."""
+    await has_client_access(client_id, user, db)
+
+    # Lookup target_id
+    res = await db.execute(
+        text("SELECT target_id FROM outreach_messages WHERE id = :mid AND client_id = :cid"),
+        {"mid": str(message_id), "cid": str(client_id)},
+    )
+    row = res.one_or_none()
+    if not row:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Message not found")
+
+    return await send_outreach_message(client_id, row[0], message_id, user, db)

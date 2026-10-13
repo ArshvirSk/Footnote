@@ -87,9 +87,9 @@ async def list_memos(
     result = await db.execute(
         text(f"""
             SELECT
-                m.id, m.client_id, m.title, m.period_start::text,
-                m.period_end::text, m.metrics, m.draft_md, m.final_md,
-                m.status, m.reviewer_id, m.published_at::text, m.created_at::text
+                m.id, m.client_id, m.title, CAST(m.period_start AS text),
+                CAST(m.period_end AS text), m.metrics, m.draft_md, m.final_md,
+                m.status, m.reviewer_id, CAST(m.published_at AS text), CAST(m.created_at AS text)
             FROM memos m
             WHERE {where}
             ORDER BY m.period_end DESC NULLS LAST, m.created_at DESC
@@ -123,9 +123,9 @@ async def get_memo(
     result = await db.execute(
         text("""
             SELECT
-                m.id, m.client_id, m.title, m.period_start::text,
-                m.period_end::text, m.metrics, m.draft_md, m.final_md,
-                m.status, m.reviewer_id, m.published_at::text, m.created_at::text
+                m.id, m.client_id, m.title, CAST(m.period_start AS text),
+                CAST(m.period_end AS text), m.metrics, m.draft_md, m.final_md,
+                m.status, m.reviewer_id, CAST(m.published_at AS text), CAST(m.created_at AS text)
             FROM memos m
             WHERE m.id = :mid AND m.client_id = :cid
         """),
@@ -191,7 +191,7 @@ async def decide_memo(
                     reviewer_id = :reviewer
                 WHERE id = :mid AND client_id = :cid
             """),
-            {"mid": str(memo_id), "cid": str(client_id), "reviewer": str(user.id)},
+            {"mid": str(memo_id), "cid": str(client_id), "reviewer": str(user.user_id)},
         )
         # Update approval record
         await db.execute(
@@ -204,7 +204,7 @@ async def decide_memo(
             {
                 "mid": str(memo_id),
                 "cid": str(client_id),
-                "reviewer": str(user.id),
+                "reviewer": str(user.user_id),
                 "comment": body.comment,
             },
         )
@@ -215,7 +215,7 @@ async def decide_memo(
                 SET status = 'rejected', reviewer_id = :reviewer
                 WHERE id = :mid AND client_id = :cid
             """),
-            {"mid": str(memo_id), "cid": str(client_id), "reviewer": str(user.id)},
+            {"mid": str(memo_id), "cid": str(client_id), "reviewer": str(user.user_id)},
         )
         await db.execute(
             text("""
@@ -227,7 +227,7 @@ async def decide_memo(
             {
                 "mid": str(memo_id),
                 "cid": str(client_id),
-                "reviewer": str(user.id),
+                "reviewer": str(user.user_id),
                 "comment": body.comment,
             },
         )
@@ -243,7 +243,7 @@ async def decide_memo(
             {
                 "mid": str(memo_id),
                 "cid": str(client_id),
-                "reviewer": str(user.id),
+                "reviewer": str(user.user_id),
                 "revised_md": body.revised_md,
             },
         )
