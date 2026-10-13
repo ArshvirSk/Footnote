@@ -20,6 +20,12 @@ from services.api.app.auth import (
 from services.api.app.config import settings
 from services.api.app.db import get_db
 from services.api.app.logging import get_logger
+from services.api.app.model_detector import (
+    detect_model_releases,
+    get_model_drift_summary,
+    get_model_release_events,
+    rebaseline_prompts,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -138,6 +144,45 @@ class BillingLimitsUpdateRequest(BaseModel):
 class ReparseRequest(BaseModel):
     client_id: UUID | None = None
     engine: str | None = None
+
+
+class ModelReleaseEventItem(BaseModel):
+    id: UUID
+    engine: str
+    model_label: str
+    detected_at: str | None = None
+    source_url: str | None = None
+
+
+class ModelReleaseCheckRequest(BaseModel):
+    custom_candidates: list[dict[str, str]] | None = None
+
+
+class ModelReleaseCheckResponse(BaseModel):
+    newly_detected: list[ModelReleaseEventItem]
+    total_events: int
+
+
+class RebaselineRequest(BaseModel):
+    engine: str | None = None
+    client_id: UUID | None = None
+    prompt_ids: list[UUID] | None = None
+
+
+class RebaselineResponse(BaseModel):
+    status: str
+    updated_prompts: int
+    engine: str | None = None
+    client_id: UUID | None = None
+
+
+class ModelDriftSummaryResponse(BaseModel):
+    total_active_prompts: int
+    never_baselined_prompts: int
+    baselined_prompts: int
+    recent_releases_count: int
+    has_unbaselined_drift: bool
+    latest_release: ModelReleaseEventItem | None = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -859,4 +904,135 @@ async def trigger_reparse(
         "count": total_answers,
         "engine": req.engine or "all",
         "client_id": str(req.client_id) if req.client_id else None,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Model Release Detection & Re-baselining
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/model-releases", response_model=list[ModelReleaseEventItem])
+async def list_model_releases(
+    user: Annotated[AuthUser, Depends(require_roles(*INTERNAL_ROLES))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    engine: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> list[dict[str, Any]]:
+    """List detected engine model release events."""
+    return await get_model_release_events(db, limit=limit, engine=engine)
+
+
+@router.get("/model-releases/summary", response_model=ModelDriftSummaryResponse)
+async def get_model_releases_summary(
+    user: Annotated[AuthUser, Depends(require_roles(*INTERNAL_ROLES))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    client_id: UUID | None = None,
+) -> dict[str, Any]:
+    """Retrieve model drift summary, unbaselined prompt count, and latest release info."""
+    return await get_model_drift_summary(db, client_id=client_id)
+
+
+@router.post("/model-releases/check", response_model=ModelReleaseCheckResponse)
+async def check_model_releases(
+    req: ModelReleaseCheckRequest,
+    user: Annotated[AuthUser, Depends(require_roles(MemberRole.OWNER, MemberRole.ADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, Any]:
+    """Scan provider catalogs and answer logs for newly detected models."""
+    new_events = await detect_model_releases(db, custom_candidates=req.custom_candidates)
+    all_events = await get_model_release_events(db, limit=100)
+
+    if new_events:
+        await record_audit_event(
+            db,
+            org_id=user.org_id,
+            actor=user.user_id,
+            action="model.releases_detected",
+            entity="model_release_events",
+            meta={"count": len(new_events), "new_models": [e["model_label"] for e in new_events]},
+        )
+    await db.commit()
+
+    return {
+        "newly_detected": new_events,
+        "total_events": len(all_events),
+    }
+
+
+@router.post("/model-releases/rebaseline", response_model=RebaselineResponse)
+async def trigger_rebaseline(
+    req: RebaselineRequest,
+    user: Annotated[AuthUser, Depends(require_roles(MemberRole.OWNER, MemberRole.ADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, Any]:
+    """Trigger re-baselining of prompts for a newly drifted or upgraded model."""
+    updated = await rebaseline_prompts(
+        db,
+        engine=req.engine,
+        client_id=req.client_id,
+        prompt_ids=req.prompt_ids,
+    )
+
+    await record_audit_event(
+        db,
+        org_id=user.org_id,
+        actor=user.user_id,
+        action="prompts.rebaselined",
+        entity="prompts",
+        meta={
+            "engine": req.engine,
+            "client_id": str(req.client_id) if req.client_id else None,
+            "updated_count": updated,
+        },
+    )
+    await db.commit()
+
+    return {
+        "status": "success",
+        "updated_prompts": updated,
+        "engine": req.engine,
+        "client_id": req.client_id,
+    }
+
+
+@router.post("/model-releases/{release_id}/rebaseline", response_model=RebaselineResponse)
+async def rebaseline_for_release(
+    release_id: UUID,
+    user: Annotated[AuthUser, Depends(require_roles(MemberRole.OWNER, MemberRole.ADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, Any]:
+    """Trigger re-baselining specifically for the engine associated with a detected release event."""
+    event_row = (
+        await db.execute(
+            text("SELECT id, engine::text, model_label FROM model_release_events WHERE id = :id"),
+            {"id": str(release_id)},
+        )
+    ).mappings().first()
+
+    if not event_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model release event not found")
+
+    engine = event_row["engine"]
+    updated = await rebaseline_prompts(db, engine=engine)
+
+    await record_audit_event(
+        db,
+        org_id=user.org_id,
+        actor=user.user_id,
+        action="prompts.rebaselined_for_release",
+        entity="model_release_events",
+        entity_id=release_id,
+        meta={
+            "engine": engine,
+            "model_label": event_row["model_label"],
+            "updated_count": updated,
+        },
+    )
+    await db.commit()
+
+    return {
+        "status": "success",
+        "updated_prompts": updated,
+        "engine": engine,
+        "client_id": None,
     }
