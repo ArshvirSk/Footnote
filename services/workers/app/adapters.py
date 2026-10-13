@@ -432,6 +432,50 @@ class AnthropicSearchAdapter(_HttpAdapter):
         )
 
 
+class GoogleAIOAdapter(_HttpAdapter):
+    """Google AI Overviews via Google Search Grounding with generative synthesis."""
+
+    engine = EngineType.GOOGLE_AIO
+
+    def _build_request(self, prompt: str, *, geo: str) -> httpx.Request:
+        return httpx.Request(
+            "POST",
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+            headers={"x-goog-api-key": self.api_key, "Content-Type": "application/json"},
+            json={
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "text": (
+                                    "Generate a comprehensive Google AI Overview search summary for this query. "
+                                    f"Synthesize key answers and cite top authoritative web sources: {prompt}"
+                                )
+                            }
+                        ]
+                    }
+                ],
+                "tools": [{"google_search": {}}],
+            },
+        )
+
+    def _parse_response(self, data: dict[str, Any]) -> RawAnswer:
+        candidate = (data.get("candidates") or [{}])[0]
+        text = "".join(part.get("text", "") for part in candidate.get("content", {}).get("parts", []))
+        citations = []
+        chunks = candidate.get("groundingMetadata", {}).get("groundingChunks", [])
+        for idx, chunk in enumerate(chunks, start=1):
+            web = chunk.get("web", {})
+            if web.get("uri"):
+                citations.append({"url": web["uri"], "title": web.get("title", ""), "position": idx})
+        return RawAnswer(
+            text=text,
+            citations=citations,
+            model_label="google-aio-gemini-v2",
+            raw_json=data,
+        )
+
+
 # Engine -> (settings key, adapter class, bucket capacity, refill/sec)
 _API_KEYS: dict[EngineType, tuple[str, type[_HttpAdapter], int, float]] = {
     EngineType.CHATGPT: ("openai_api_key", OpenAISearchAdapter, 50, 1.0),
@@ -439,7 +483,7 @@ _API_KEYS: dict[EngineType, tuple[str, type[_HttpAdapter], int, float]] = {
     EngineType.PERPLEXITY: ("perplexity_api_key", PerplexityAdapter, 30, 0.5),
     EngineType.GROK: ("xai_api_key", GrokAdapter, 30, 0.5),
     EngineType.CLAUDE: ("anthropic_api_key", AnthropicSearchAdapter, 30, 0.5),
-    # google_aio has no public query API yet (UI collection lands in Phase 2).
+    EngineType.GOOGLE_AIO: ("google_aio_api_key", GoogleAIOAdapter, 30, 0.5),
 }
 
 

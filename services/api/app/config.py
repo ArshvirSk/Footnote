@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     perplexity_api_key: str = ""
     xai_api_key: str = ""
     anthropic_api_key: str = ""
+    google_aio_api_key: str = ""
 
     # Milestone 2: mock engines are an explicit opt-in (never a silent fallback).
     # Mock answers are marked raw_json.mock=true and model_label gets a -mock suffix.
