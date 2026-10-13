@@ -1348,5 +1348,67 @@ export const adminApi = {
     limits: { max_prompts?: number; max_monthly_spend_usd?: number; max_runs_per_day?: number }
   ) =>
     api.patch<{ client_id: string; billing_limits: any }>(`/admin/clients/${clientId}/billing-limits`, limits),
+  listModelReleases: (engine?: string) =>
+    api.get<ModelReleaseEventItem[]>(`/admin/model-releases${engine ? `?engine=${engine}` : ""}`),
+  getModelDriftSummary: (clientId?: string) =>
+    api.get<ModelDriftSummary>(`/admin/model-releases/summary${clientId ? `?client_id=${clientId}` : ""}`),
+  checkModelReleases: (customCandidates?: Array<{ engine: string; model_label: string; source_url?: string }>) =>
+    api.post<{ newly_detected: ModelReleaseEventItem[]; total_events: number }>("/admin/model-releases/check", {
+      custom_candidates: customCandidates,
+    }),
+  rebaselinePrompts: (data?: { engine?: string; client_id?: string; prompt_ids?: string[] }) =>
+    api.post<{ status: string; updated_prompts: number }>("/admin/model-releases/rebaseline", data ?? {}),
+  rebaselineForRelease: (releaseId: string) =>
+    api.post<{ status: string; updated_prompts: number }>(`/admin/model-releases/${releaseId}/rebaseline`, {}),
+  getDaemonStatus: () => api.get<DaemonStatus>("/admin/daemon/status"),
+  triggerDaemon: (tasks?: string[]) =>
+    api.post<{ cycle_status: string; executed_at: string; tasks: Record<string, any> }>("/admin/daemon/trigger", {
+      tasks,
+    }),
+  getMaintenanceTables: () => api.get<Record<string, number>>("/admin/maintenance/tables"),
+  pruneMaintenanceData: (params?: {
+    failed_answers_days?: number;
+    historical_answers_days?: number;
+    agent_runs_days?: number;
+    audit_logs_days?: number;
+    client_id?: string;
+  }) => api.post<MaintenancePruneResponse>("/admin/maintenance/prune", params ?? {}),
 };
+
+export interface ModelReleaseEventItem {
+  id: string;
+  engine: string;
+  model_label: string;
+  detected_at?: string;
+  source_url?: string;
+}
+
+export interface ModelDriftSummary {
+  total_active_prompts: number;
+  never_baselined_prompts: number;
+  baselined_prompts: number;
+  recent_releases_count: number;
+  has_unbaselined_drift: boolean;
+  latest_release?: ModelReleaseEventItem;
+}
+
+export interface DaemonStatus {
+  status: string;
+  uptime_seconds: number;
+  started_at: string;
+  last_run: Record<string, string>;
+  task_counts: Record<string, number>;
+  last_errors: Record<string, string>;
+  queue_depth: number;
+  supported_tasks: string[];
+}
+
+export interface MaintenancePruneResponse {
+  pruned_failed_answers: number;
+  pruned_historical_answers: number;
+  pruned_agent_runs: number;
+  pruned_audit_logs: number;
+  total_pruned: number;
+  retention_cutoffs: Record<string, string>;
+}
 

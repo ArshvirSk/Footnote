@@ -29,6 +29,12 @@ import {
   Users,
   X,
   Zap,
+  Cpu,
+  Database,
+  Play,
+  Server,
+  ShieldCheck,
+  ArrowUpRight,
 } from "lucide-react";
 import {
   AdminSpendResponse,
@@ -37,6 +43,9 @@ import {
   AuditLogItem,
   Client,
   EngineStatusItem,
+  ModelDriftSummary,
+  ModelReleaseEventItem,
+  DaemonStatus,
   adminApi,
   clients,
 } from "@/lib/api";
@@ -80,6 +89,17 @@ export default function AdminPage() {
   const [reparsing, setReparsing] = useState(false);
   const [reparseResult, setReparseResult] = useState<string | null>(null);
 
+  // 6. M8 Automation & Hardening state
+  const [modelReleases, setModelReleases] = useState<ModelReleaseEventItem[]>([]);
+  const [driftSummary, setDriftSummary] = useState<ModelDriftSummary | null>(null);
+  const [daemonStatus, setDaemonStatus] = useState<DaemonStatus | null>(null);
+  const [tableCounts, setTableCounts] = useState<Record<string, number>>({});
+  const [checkingModels, setCheckingModels] = useState(false);
+  const [rebaselining, setRebaselining] = useState(false);
+  const [triggeringDaemon, setTriggeringDaemon] = useState(false);
+  const [pruningData, setPruningData] = useState(false);
+  const [pruneResult, setPruneResult] = useState<string | null>(null);
+
   const loadDataForTab = async (tab: AdminTab) => {
     try {
       setLoading(true);
@@ -110,8 +130,18 @@ export default function AdminPage() {
         const clientList = await clients.list(true);
         setAllClients(clientList);
       } else if (tab === "engines") {
-        const statuses = await adminApi.getEngineStatus();
+        const [statuses, releases, drift, daemon, tables] = await Promise.all([
+          adminApi.getEngineStatus(),
+          adminApi.listModelReleases(),
+          adminApi.getModelDriftSummary(),
+          adminApi.getDaemonStatus(),
+          adminApi.getMaintenanceTables(),
+        ]);
         setEngineStatus(statuses);
+        setModelReleases(releases);
+        setDriftSummary(drift);
+        setDaemonStatus(daemon);
+        setTableCounts(tables);
       }
     } catch (err: any) {
       setError(err?.message || "Failed to load admin module data");
@@ -194,6 +224,83 @@ export default function AdminPage() {
       setError(err?.message || "Failed to dispatch re-parse");
     } finally {
       setReparsing(false);
+    }
+  };
+
+  // M8: Model check handler
+  const handleCheckModels = async () => {
+    try {
+      setCheckingModels(true);
+      setError(null);
+      const res = await adminApi.checkModelReleases();
+      setNotice(
+        res.newly_detected.length > 0
+          ? `Discovered ${res.newly_detected.length} new model release(s)!`
+          : "Engine scan complete: all models match baseline registry."
+      );
+      await loadDataForTab("engines");
+    } catch (err: any) {
+      setError(err?.message || "Failed to scan model releases");
+    } finally {
+      setCheckingModels(false);
+    }
+  };
+
+  // M8: Re-baseline prompts handler
+  const handleRebaseline = async (engine?: string, releaseId?: string) => {
+    try {
+      setRebaselining(true);
+      setError(null);
+      let res;
+      if (releaseId) {
+        res = await adminApi.rebaselineForRelease(releaseId);
+      } else {
+        res = await adminApi.rebaselinePrompts({ engine });
+      }
+      setNotice(`Successfully calibrated and re-baselined ${res.updated_prompts} prompt(s).`);
+      await loadDataForTab("engines");
+    } catch (err: any) {
+      setError(err?.message || "Failed to re-baseline prompts");
+    } finally {
+      setRebaselining(false);
+    }
+  };
+
+  // M8: Trigger daemon cycle handler
+  const handleTriggerDaemon = async () => {
+    try {
+      setTriggeringDaemon(true);
+      setError(null);
+      const res = await adminApi.triggerDaemon();
+      setNotice(`Background daemon completed cycle: ${Object.keys(res.tasks).length} tasks executed.`);
+      await loadDataForTab("engines");
+    } catch (err: any) {
+      setError(err?.message || "Failed to run background daemon cycle");
+    } finally {
+      setTriggeringDaemon(false);
+    }
+  };
+
+  // M8: Prune maintenance data handler
+  const handlePruneData = async () => {
+    try {
+      setPruningData(true);
+      setError(null);
+      const res = await adminApi.pruneMaintenanceData({
+        failed_answers_days: 30,
+        historical_answers_days: 365,
+        agent_runs_days: 90,
+        audit_logs_days: 180,
+      });
+      setPruneResult(
+        `Pruned ${res.total_pruned} total records (${res.pruned_failed_answers} failed answers, ${res.pruned_agent_runs} agent runs, ${res.pruned_audit_logs} audit logs).`
+      );
+      setNotice(`Database maintenance completed: ${res.total_pruned} rows cleaned up.`);
+      await loadDataForTab("engines");
+    } catch (err: any) {
+      setError(err?.message || "Failed to prune database records");
+    } finally {
+      setPruningData(false);
     }
   };
 
@@ -762,6 +869,251 @@ export default function AdminPage() {
               {reparsing ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <RefreshCw className="w-3.5 h-3.5 mr-1.5" />}
               Dispatch Re-parse
             </button>
+          </div>
+
+          {/* ───────────────────────────────────────────────────────────── */}
+          {/* M8: Model Release Drift Detection & Re-baselining */}
+          {/* ───────────────────────────────────────────────────────────── */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 md:p-8 shadow-2xs space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Cpu className="w-5 h-5 text-slate-500" />
+                  Model Release Detection &amp; Version Drift
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Monitors AI engine base-model upgrades. When models change, prompts can be calibrated and re-baselined.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleCheckModels}
+                  disabled={checkingModels}
+                  className="inline-flex items-center px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-semibold transition disabled:opacity-50"
+                >
+                  {checkingModels ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <RefreshCw className="w-3.5 h-3.5 mr-1.5" />}
+                  Scan Engine Releases
+                </button>
+                <button
+                  onClick={() => handleRebaseline()}
+                  disabled={rebaselining}
+                  className="inline-flex items-center px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold transition disabled:opacity-50"
+                >
+                  {rebaselining ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <ShieldCheck className="w-3.5 h-3.5 mr-1.5" />}
+                  Re-baseline All Prompts
+                </button>
+              </div>
+            </div>
+
+            {/* Drift Telemetry Cards */}
+            {driftSummary && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-1">
+                  <div className="text-[11px] font-medium text-slate-500">Active Prompts Monitored</div>
+                  <div className="text-xl font-bold text-slate-900">{driftSummary.total_active_prompts}</div>
+                  <div className="text-[11px] text-slate-500">
+                    <span className="font-semibold text-emerald-600">{driftSummary.baselined_prompts}</span> baselined
+                    {driftSummary.never_baselined_prompts > 0 && (
+                      <span className="text-amber-600 font-semibold ml-1.5">
+                        ({driftSummary.never_baselined_prompts} uncalibrated)
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-1">
+                  <div className="text-[11px] font-medium text-slate-500">Engine Releases Detected</div>
+                  <div className="text-xl font-bold text-slate-900">{modelReleases.length}</div>
+                  <div className="text-[11px] text-slate-500">
+                    {driftSummary.recent_releases_count} new in past 7 days
+                  </div>
+                </div>
+
+                <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl space-y-1">
+                  <div className="text-[11px] font-medium text-slate-500">Drift Baseline Status</div>
+                  <div className="text-xl font-bold">
+                    {driftSummary.has_unbaselined_drift ? (
+                      <span className="text-amber-600">Re-baseline Needed</span>
+                    ) : (
+                      <span className="text-emerald-600">Fully Calibrated</span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    {driftSummary.latest_release
+                      ? `Latest: ${driftSummary.latest_release.engine} (${driftSummary.latest_release.model_label})`
+                      : "No version drift detected"}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Model Releases Table */}
+            <div className="border border-slate-200 rounded-xl overflow-hidden">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-semibold text-[10px]">
+                  <tr>
+                    <th className="px-4 py-3">Engine</th>
+                    <th className="px-4 py-3">Detected Model Label</th>
+                    <th className="px-4 py-3">Detected At</th>
+                    <th className="px-4 py-3">Source &amp; Release Notes</th>
+                    <th className="px-4 py-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                  {modelReleases.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
+                        No model release events recorded yet. Click &quot;Scan Engine Releases&quot; above to initialize.
+                      </td>
+                    </tr>
+                  ) : (
+                    modelReleases.map((rel) => (
+                      <tr key={rel.id} className="hover:bg-slate-50/50">
+                        <td className="px-4 py-3 font-bold text-slate-900 uppercase">{rel.engine}</td>
+                        <td className="px-4 py-3 font-mono text-slate-900">{rel.model_label}</td>
+                        <td className="px-4 py-3 text-slate-500">
+                          {rel.detected_at ? new Date(rel.detected_at).toLocaleDateString() : "Baseline"}
+                        </td>
+                        <td className="px-4 py-3">
+                          {rel.source_url ? (
+                            <a
+                              href={rel.source_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-slate-600 hover:text-slate-900 underline inline-flex items-center gap-1"
+                            >
+                              View Notes <ArrowUpRight className="w-3 h-3" />
+                            </a>
+                          ) : (
+                            <span className="text-slate-400">Official Catalog</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            onClick={() => handleRebaseline(rel.engine, rel.id)}
+                            className="px-2.5 py-1 text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg transition"
+                          >
+                            Re-baseline {rel.engine}
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* ───────────────────────────────────────────────────────────── */}
+          {/* M8: Background Worker Daemon Telemetry */}
+          {/* ───────────────────────────────────────────────────────────── */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 md:p-8 shadow-2xs space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Server className="w-5 h-5 text-slate-500" />
+                  Background Worker Daemon
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Autonomous task runner for prompt collection, rollups, content decay scans, and data retention.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {daemonStatus && (
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 ${
+                    daemonStatus.status === "active"
+                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      : "bg-slate-100 text-slate-600"
+                  }`}>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    Daemon {daemonStatus.status === "active" ? "Active" : "Idle"}
+                  </span>
+                )}
+                <button
+                  onClick={handleTriggerDaemon}
+                  disabled={triggeringDaemon}
+                  className="inline-flex items-center px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold transition disabled:opacity-50"
+                >
+                  {triggeringDaemon ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Play className="w-3.5 h-3.5 mr-1.5" />}
+                  Run Maintenance Cycle
+                </button>
+              </div>
+            </div>
+
+            {/* Daemon Telemetry Cards */}
+            {daemonStatus && (
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                {[
+                  { key: "daily_batch", label: "Daily Batch", desc: "Nightly collection" },
+                  { key: "nightly_rollup", label: "Metric Rollup", desc: "Daily metrics & gaps" },
+                  { key: "decay_scan", label: "Decay Scanner", desc: "Citation loss checks" },
+                  { key: "model_release_check", label: "Model Drift", desc: "Provider catalog scan" },
+                  { key: "retention_prune", label: "Data Retention", desc: "Clean expired logs" },
+                ].map((task) => (
+                  <div key={task.key} className="p-3 bg-slate-50 border border-slate-200/80 rounded-xl space-y-1">
+                    <div className="text-[10px] uppercase font-bold text-slate-500">{task.label}</div>
+                    <div className="text-lg font-bold text-slate-900">
+                      {daemonStatus.task_counts[task.key] || 0}
+                      <span className="text-[10px] font-normal text-slate-400 ml-1">runs</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 truncate">
+                      {daemonStatus.last_run[task.key]
+                        ? new Date(daemonStatus.last_run[task.key]).toLocaleTimeString()
+                        : "Scheduled"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ───────────────────────────────────────────────────────────── */}
+          {/* M8: Database Retention & Hygiene */}
+          {/* ───────────────────────────────────────────────────────────── */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 md:p-8 shadow-2xs space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Database className="w-5 h-5 text-slate-500" />
+                  Database Hygiene &amp; Data Retention
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Prunes expired error logs, failed runs, and stale historical answers beyond retention thresholds while preserving aggregated metrics.
+                </p>
+              </div>
+
+              <button
+                onClick={handlePruneData}
+                disabled={pruningData}
+                className="inline-flex items-center px-3.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-semibold transition disabled:opacity-50"
+              >
+                {pruningData ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Trash2 className="w-3.5 h-3.5 mr-1.5" />}
+                Prune Expired Data
+              </button>
+            </div>
+
+            {pruneResult && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-medium">
+                {pruneResult}
+              </div>
+            )}
+
+            {/* Live table count badges */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+              {Object.entries(tableCounts).map(([table, count]) => (
+                <div key={table} className="p-3 bg-slate-50 border border-slate-200/80 rounded-xl space-y-0.5">
+                  <div className="text-[10px] font-mono text-slate-500 truncate">{table}</div>
+                  <div className="text-base font-bold text-slate-900">{count}</div>
+                  <div className="text-[10px] text-slate-400">rows</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="text-[11px] text-slate-400 border-t border-slate-100 pt-3">
+              Retention policies: Failed/mock answers (30 days) &bull; Historical answers (365 days) &bull; Agent runs (90 days) &bull; Audit trail logs (180 days).
+            </div>
           </div>
         </div>
       )}

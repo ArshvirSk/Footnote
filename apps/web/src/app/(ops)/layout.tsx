@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import OpsHeader from "./OpsHeader";
 import OpsSidebar from "./OpsSidebar";
+import ModelDriftBanner from "./ModelDriftBanner";
 
 export const metadata: Metadata = {
   title: "Footnote Ops Console",
@@ -19,6 +20,7 @@ export default function OpsLayout({
       {/* Main content */}
       <main className="flex-1 flex flex-col">
         <OpsHeader />
+        <ModelDriftBanner />
         <div className="flex-1 p-8 overflow-auto">
           {children}
         </div>
