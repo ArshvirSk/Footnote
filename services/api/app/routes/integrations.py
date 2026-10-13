@@ -2,13 +2,19 @@
 
 import base64
 import os
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from services.api.app.auth import AuthUser, MemberRole, has_client_access, require_roles
+from services.api.app.auth import (
+    AuthUser,
+    MemberRole,
+    get_current_user,
+    has_client_access,
+    require_roles,
+)
 from services.api.app.config import settings
 from services.api.app.db import get_db
 from services.api.app.logging import get_logger
@@ -68,11 +74,12 @@ async def oauth_callback(
     async with db.begin():
         await db.execute(
             text("""
-                INSERT INTO integrations (client_id, provider, account_ref, tokens_enc, status)
-                VALUES (:cid, :prov, :acc, :tokens, 'active')
+                INSERT INTO integrations (client_id, provider, account_ref, tokens_enc, status, sync_status)
+                VALUES (:cid, :prov, :acc, :tokens, 'active', 'idle')
                 ON CONFLICT (client_id, provider) DO UPDATE SET
                     tokens_enc = EXCLUDED.tokens_enc,
                     status = 'active',
+                    sync_status = 'idle',
                     last_synced_at = NULL
             """),
             {
@@ -85,3 +92,62 @@ async def oauth_callback(
 
     logger.info("integration_connected", client_id=str(client_id), provider=body.provider)
     return {"status": "success", "provider": body.provider}
+
+
+@router.get("/status")
+async def get_integrations_status(
+    client_id: UUID,
+    user: Annotated[AuthUser, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[dict[str, Any]]:
+    """Retrieve integration connection and synchronization status for a client."""
+    await has_client_access(user, client_id, db)
+
+    res = await db.execute(
+        text("""
+            SELECT provider, account_ref, status, last_synced_at, sync_status, sync_error
+            FROM integrations
+            WHERE client_id = CAST(:cid AS uuid)
+            ORDER BY provider ASC
+        """),
+        {"cid": str(client_id)},
+    )
+    rows = res.fetchall()
+    return [
+        {
+            "provider": str(r[0]),
+            "account_ref": str(r[1]) if r[1] else None,
+            "status": str(r[2]),
+            "last_synced_at": r[3].isoformat() if r[3] else None,
+            "sync_status": str(r[4]) if r[4] else "idle",
+            "sync_error": str(r[5]) if r[5] else None,
+        }
+        for r in rows
+    ]
+
+
+@router.post("/connect-demo")
+async def connect_demo_integrations(
+    client_id: UUID,
+    user: Annotated[AuthUser, Depends(require_roles(MemberRole.OWNER, MemberRole.ADMIN, MemberRole.STRATEGIST))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, Any]:
+    """Enable demo GSC and GA4 integrations and initiate initial sync."""
+    await has_client_access(user, client_id, db)
+    from services.api.app.search_analytics import seed_or_sync_client_search_data
+
+    # Ensure integration records exist
+    for prov in ("gsc", "ga4"):
+        await db.execute(
+            text("""
+                INSERT INTO integrations (client_id, provider, account_ref, tokens_enc, status, sync_status)
+                VALUES (CAST(:cid AS uuid), :prov, :acc, 'demo_token'::bytea, 'active', 'idle')
+                ON CONFLICT (client_id, provider) DO UPDATE SET status = 'active'
+            """),
+            {"cid": str(client_id), "prov": prov, "acc": f"demo_{prov}@company.com"},
+        )
+
+    # Perform initial sync
+    sync_result = await seed_or_sync_client_search_data(db, client_id=client_id, days=14)
+    await db.commit()
+    return {"status": "connected", "details": sync_result}
