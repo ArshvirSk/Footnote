@@ -89,7 +89,7 @@ async def list_reports(
 ) -> list[dict[str, Any]]:
     """List historical executive visibility reports for a client."""
     # Check portal access if portal user
-    if user.role in PORTAL_ROLES and user.client_id and user.client_id != client_id:
+    if user.role in PORTAL_ROLES and client_id not in user.client_ids:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to client reports")
 
     return await list_client_reports(db, client_id=client_id, limit=limit)
@@ -108,12 +108,13 @@ async def export_report(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
 
     # If portal user, verify client match
-    if user.role in PORTAL_ROLES and user.client_id and str(user.client_id) != report["client_id"]:
+    if user.role in PORTAL_ROLES and UUID(report["client_id"]) not in user.client_ids:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to report")
 
     if export_format.lower() == "json":
+        import json
         return Response(
-            content=str(report["metrics_summary"]),
+            content=json.dumps(report["metrics_summary"]),
             media_type="application/json",
             headers={"Content-Disposition": f'attachment; filename="report-{report_id}.json"'},
         )

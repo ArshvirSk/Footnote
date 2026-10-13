@@ -177,8 +177,8 @@ async def generate_executive_report(
         await db.execute(
             text("""
                 SELECT
-                    COALESCE(AVG(share_of_voice_pct), 0.0) as avg_sov,
-                    COALESCE(SUM(verified_citations_count), 0) as total_citations
+                    COALESCE(AVG(share_of_voice), 0.0) as avg_sov,
+                    COALESCE(SUM(brand_citations), 0) as total_citations
                 FROM daily_metrics
                 WHERE client_id = CAST(:cid AS uuid)
                   AND day >= CURRENT_DATE - INTERVAL '30 days'
