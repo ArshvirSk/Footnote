@@ -26,6 +26,8 @@ from services.api.app.model_detector import (
     get_model_release_events,
     rebaseline_prompts,
 )
+from services.api.app.retention import get_table_counts, prune_database_records
+from services.workers.app.daemon import execute_daemon_cycle, get_daemon_status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -183,6 +185,44 @@ class ModelDriftSummaryResponse(BaseModel):
     recent_releases_count: int
     has_unbaselined_drift: bool
     latest_release: ModelReleaseEventItem | None = None
+
+
+class DaemonStatusResponse(BaseModel):
+    status: str
+    uptime_seconds: int
+    started_at: str
+    last_run: dict[str, str] = Field(default_factory=dict)
+    task_counts: dict[str, int] = Field(default_factory=dict)
+    last_errors: dict[str, str] = Field(default_factory=dict)
+    queue_depth: int = 0
+    supported_tasks: list[str] = Field(default_factory=list)
+
+
+class DaemonTriggerRequest(BaseModel):
+    tasks: list[str] | None = None
+
+
+class DaemonTriggerResponse(BaseModel):
+    cycle_status: str
+    executed_at: str
+    tasks: dict[str, Any]
+
+
+class MaintenancePruneRequest(BaseModel):
+    failed_answers_days: int = 30
+    historical_answers_days: int = 365
+    agent_runs_days: int = 90
+    audit_logs_days: int = 180
+    client_id: UUID | None = None
+
+
+class MaintenancePruneResponse(BaseModel):
+    pruned_failed_answers: int
+    pruned_historical_answers: int
+    pruned_agent_runs: int
+    pruned_audit_logs: int
+    total_pruned: int
+    retention_cutoffs: dict[str, str]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1036,3 +1076,75 @@ async def rebaseline_for_release(
         "engine": engine,
         "client_id": None,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Background Worker Daemon & System Retention
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/daemon/status", response_model=DaemonStatusResponse)
+async def get_daemon_telemetry(
+    user: Annotated[AuthUser, Depends(require_roles(*INTERNAL_ROLES))],
+) -> dict[str, Any]:
+    """Retrieve background daemon uptime, task counts, and last execution times."""
+    return get_daemon_status()
+
+
+@router.post("/daemon/trigger", response_model=DaemonTriggerResponse)
+async def trigger_daemon_cycle(
+    req: DaemonTriggerRequest,
+    user: Annotated[AuthUser, Depends(require_roles(MemberRole.OWNER, MemberRole.ADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, Any]:
+    """Manually trigger background daemon scheduled cycle."""
+    res = await execute_daemon_cycle(db, tasks=req.tasks)
+    await record_audit_event(
+        db,
+        org_id=user.org_id,
+        actor=user.user_id,
+        action="daemon.cycle_triggered",
+        entity="daemon",
+        meta={"tasks": req.tasks or "all", "results": res.get("tasks")},
+    )
+    await db.commit()
+    return res
+
+
+@router.get("/maintenance/tables")
+async def get_maintenance_table_counts(
+    user: Annotated[AuthUser, Depends(require_roles(*INTERNAL_ROLES))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, int]:
+    """Retrieve row counts for database hygiene and observability."""
+    return await get_table_counts(db)
+
+
+@router.post("/maintenance/prune", response_model=MaintenancePruneResponse)
+async def prune_maintenance_data(
+    req: MaintenancePruneRequest,
+    user: Annotated[AuthUser, Depends(require_roles(MemberRole.OWNER, MemberRole.ADMIN))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, Any]:
+    """Prune expired error logs, failed runs, and stale historical answers."""
+    result = await prune_database_records(
+        db,
+        failed_answers_days=req.failed_answers_days,
+        historical_answers_days=req.historical_answers_days,
+        agent_runs_days=req.agent_runs_days,
+        audit_logs_days=req.audit_logs_days,
+        client_id=req.client_id,
+    )
+
+    await record_audit_event(
+        db,
+        org_id=user.org_id,
+        actor=user.user_id,
+        action="maintenance.pruned",
+        entity="database",
+        meta={
+            "total_pruned": result.get("total_pruned", 0),
+            "client_id": str(req.client_id) if req.client_id else None,
+        },
+    )
+    await db.commit()
+    return result
