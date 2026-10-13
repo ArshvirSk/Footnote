@@ -326,7 +326,7 @@ async def get_top_search_queries(
         FROM q_agg q
         LEFT JOIN prompts p
           ON p.client_id = CAST(:cid AS uuid)
-         AND LOWER(TRIM(p.prompt_text)) = LOWER(TRIM(q.query))
+         AND LOWER(TRIM(p.text)) = LOWER(TRIM(q.query))
          AND p.retired_at IS NULL
         ORDER BY q.clicks DESC, q.impressions DESC
     """)
@@ -372,7 +372,7 @@ async def seed_or_sync_client_search_data(
 
     # 2. Check if active client prompts exist to mirror in queries
     prompts_res = await db.execute(
-        text("SELECT prompt_text FROM prompts WHERE client_id = CAST(:cid AS uuid) LIMIT 10"),
+        text("SELECT text FROM prompts WHERE client_id = CAST(:cid AS uuid) LIMIT 10"),
         {"cid": str(client_id)},
     )
     prompt_texts = [r[0] for r in prompts_res.fetchall()]
