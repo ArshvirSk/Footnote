@@ -11,6 +11,8 @@ const NAV_ITEMS = [
   { href: "/ops/tracking", label: "Tracking" },
   { href: "/ops/gaps", label: "Gaps & Slips" },
   { href: "/ops/pipeline", label: "Content Pipeline" },
+  { href: "/ops/off-site", label: "Off-Site & PR" },
+  { href: "/ops/memos", label: "Executive Memos" },
   { href: "/ops/site-audit", label: "Site Audit" },
   { href: "/ops/admin", label: "Admin" },
 ];

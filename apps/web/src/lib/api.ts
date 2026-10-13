@@ -922,6 +922,206 @@ export const publishingApi = {
     api.get<PublicationRecord[]>(`/clients/${clientId}/publications${itemId ? `?content_item_id=${itemId}` : ""}`),
 };
 
+// ───────────── M6 Growth & Retention APIs ─────────────
+
+export interface KPIOverview {
+  published_content: number;
+  won_gaps: number;
+  ai_mentions: number;
+  citation_share_pct: number;
+  estimated_referral_value: number;
+  days: number;
+}
+
+export interface TimeseriesPoint {
+  day: string;
+  brand_mentions: number;
+  competitor_mentions: number;
+  citation_share: number;
+}
+
+export interface WonGap {
+  id: string;
+  prompt_text: string | null;
+  gap_type: string;
+  closed_at: string | null;
+  proof_citations: any[];
+  published_url: string | null;
+}
+
+export interface EngineShare {
+  engine: string;
+  mention_rate: number;
+  citation_share: number;
+  prompts_visible: number;
+  prompts_tracked: number;
+}
+
+export const analyticsApi = {
+  getOverview: (clientId: string, days: number = 30) =>
+    api.get<KPIOverview>(`/clients/${clientId}/analytics/overview?days=${days}`),
+  getTimeseries: (clientId: string, days: number = 30) =>
+    api.get<TimeseriesPoint[]>(`/clients/${clientId}/analytics/timeseries?days=${days}`),
+  getWonGaps: (clientId: string, days: number = 30) =>
+    api.get<WonGap[]>(`/clients/${clientId}/analytics/won-gaps?days=${days}`),
+  getEngineShare: (clientId: string, days: number = 30) =>
+    api.get<EngineShare[]>(`/clients/${clientId}/analytics/engine-share?days=${days}`),
+};
+
+export interface RefreshProposal {
+  id: string;
+  client_id: string;
+  content_item_id: string;
+  status: "pending" | "approved" | "rejected" | string;
+  reason_json?: Record<string, any>;
+  diff_summary?: string;
+  proposed_version_id?: string;
+  reviewer_id?: string;
+  decided_at?: string;
+  created_at?: string;
+  item_title?: string;
+  slug?: string;
+  decay_score?: number;
+}
+
+export const refreshApi = {
+  scan: (clientId: string) =>
+    api.post<{ scanned: number; decayed_found: number; proposals_created: number; decay_threshold: number }>(
+      `/clients/${clientId}/refresh/scan`
+    ),
+  listProposals: (clientId: string, status?: string) =>
+    api.get<RefreshProposal[]>(`/clients/${clientId}/refresh/proposals${status ? `?status=${status}` : ""}`),
+  getProposal: (clientId: string, proposalId: string) =>
+    api.get<RefreshProposal>(`/clients/${clientId}/refresh/proposals/${proposalId}`),
+  decideProposal: (clientId: string, proposalId: string, decision: "approved" | "rejected", notes?: string) =>
+    api.post<{ status: string; proposal_id: string; decision: string }>(
+      `/clients/${clientId}/refresh/proposals/${proposalId}/decide`,
+      { decision, notes }
+    ),
+  proposeItem: (clientId: string, itemId: string, reason?: string) =>
+    api.post<RefreshProposal>(`/clients/${clientId}/refresh/items/${itemId}/propose`, { reason }),
+};
+
+export interface ThirdPartyTask {
+  id: string;
+  client_id: string;
+  platform: "reddit" | "quora" | "hackernews" | "forum" | string;
+  thread_url: string;
+  thread_title?: string;
+  prompt_context?: string;
+  status: "todo" | "drafting" | "review" | "posted" | string;
+  assigned_to?: string;
+  response_draft?: string;
+  posted_url?: string;
+  posted_at?: string;
+  due_at?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const thirdPartyApi = {
+  listTasks: (clientId: string, params?: { status?: string; platform?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.status) q.set("status", params.status);
+    if (params?.platform) q.set("platform", params.platform);
+    const qs = q.toString();
+    return api.get<ThirdPartyTask[]>(`/clients/${clientId}/third-party/tasks${qs ? `?${qs}` : ""}`);
+  },
+  createTask: (clientId: string, body: { platform: string; thread_url: string; thread_title?: string; prompt_context?: string }) =>
+    api.post<ThirdPartyTask>(`/clients/${clientId}/third-party/tasks`, body),
+  getTask: (clientId: string, taskId: string) =>
+    api.get<ThirdPartyTask>(`/clients/${clientId}/third-party/tasks/${taskId}`),
+  updateTask: (clientId: string, taskId: string, body: Partial<ThirdPartyTask>) =>
+    api.patch<ThirdPartyTask>(`/clients/${clientId}/third-party/tasks/${taskId}`, body),
+  deleteTask: (clientId: string, taskId: string) =>
+    api.delete<{ status: string }>(`/clients/${clientId}/third-party/tasks/${taskId}`),
+  draftResponse: (clientId: string, taskId: string, instructions?: string) =>
+    api.post<{ status: string; response_draft: string }>(
+      `/clients/${clientId}/third-party/tasks/${taskId}/draft`,
+      { instructions }
+    ),
+};
+
+export interface OutreachTarget {
+  id: string;
+  client_id: string;
+  domain: string;
+  target_url?: string;
+  status: "discovered" | "pitch_ready" | "contacted" | "won" | "declined" | string;
+  citation_frequency?: number;
+  relevance_notes?: string;
+  created_at?: string;
+  messages_count?: number;
+}
+
+export interface OutreachMessage {
+  id: string;
+  target_id: string;
+  pitch_type: string;
+  subject: string;
+  body: string;
+  status: "draft" | "pending_approval" | "approved" | "sent" | "rejected" | string;
+  approval_id?: string;
+  sent_at?: string;
+  created_at?: string;
+}
+
+export const outreachApi = {
+  discoverTargets: (clientId: string, limit?: number) =>
+    api.post<{ discovered: number; inserted: number }>(
+      `/clients/${clientId}/outreach/discover${limit ? `?limit=${limit}` : ""}`
+    ),
+  listTargets: (clientId: string, status?: string) =>
+    api.get<OutreachTarget[]>(`/clients/${clientId}/outreach/targets${status ? `?status=${status}` : ""}`),
+  createTarget: (clientId: string, body: { domain: string; target_url?: string; relevance_notes?: string }) =>
+    api.post<OutreachTarget>(`/clients/${clientId}/outreach/targets`, body),
+  getTarget: (clientId: string, targetId: string) =>
+    api.get<OutreachTarget & { messages: OutreachMessage[] }>(`/clients/${clientId}/outreach/targets/${targetId}`),
+  draftPitch: (clientId: string, targetId: string, pitchType?: string) =>
+    api.post<OutreachMessage>(`/clients/${clientId}/outreach/targets/${targetId}/draft-pitch`, { pitch_type: pitchType }),
+  dispatchMessage: (clientId: string, messageId: string, simulate: boolean = true) =>
+    api.post<{ status: string; message_id: string; detail: string }>(
+      `/clients/${clientId}/outreach/messages/${messageId}/dispatch`,
+      { simulate }
+    ),
+};
+
+export interface MemoRecord {
+  id: string;
+  client_id: string;
+  period_start: string;
+  period_end: string;
+  title?: string;
+  status: "draft" | "review" | "approved" | "published" | "rejected" | string;
+  metrics_summary_json?: Record<string, any>;
+  markdown_body?: string;
+  published_url?: string;
+  published_at?: string;
+  created_at?: string;
+  reviewer_id?: string;
+  approval_status?: string;
+}
+
+export const memosApi = {
+  listMemos: (clientId: string, status?: string) =>
+    api.get<MemoRecord[]>(`/clients/${clientId}/memos${status ? `?status=${status}` : ""}`),
+  generateMemo: (clientId: string, days: number = 30) =>
+    api.post<{ status: string; memo_id: string; title: string }>(`/clients/${clientId}/memos/generate`, { days }),
+  getMemo: (clientId: string, memoId: string) =>
+    api.get<MemoRecord>(`/clients/${clientId}/memos/${memoId}`),
+  decideMemo: (clientId: string, memoId: string, decision: "approved" | "rejected" | "revise", feedback?: string) =>
+    api.post<{ status: string; memo_id: string; new_status: string }>(
+      `/clients/${clientId}/memos/${memoId}/decide`,
+      { decision, feedback }
+    ),
+  publishMemo: (clientId: string, memoId: string) =>
+    api.post<{ status: string; memo_id: string; published_url: string }>(
+      `/clients/${clientId}/memos/${memoId}/publish`
+    ),
+  exportMemo: (clientId: string, memoId: string) =>
+    api.get<{ memo_id: string; title: string; markdown: string }>(`/clients/${clientId}/memos/${memoId}/export`),
+};
+
 export const me = () => api.get<Me>("/auth/me");
 
 /** Resolve the client every ops page should operate on.

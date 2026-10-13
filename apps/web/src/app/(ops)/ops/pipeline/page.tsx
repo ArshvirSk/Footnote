@@ -22,10 +22,12 @@ import {
 } from "lucide-react";
 import {
   contentApi,
+  refreshApi,
   getDefaultClientId,
   KanbanCard,
   PipelineKanbanColumn,
   PipelineKanbanResponse,
+  type RefreshProposal,
 } from "@/lib/api";
 
 export default function PipelinePage() {
@@ -41,6 +43,20 @@ export default function PipelinePage() {
   const [briefTitle, setBriefTitle] = useState("");
   const [briefAngle, setBriefAngle] = useState("");
   const [briefSources, setBriefSources] = useState("");
+
+  // Content Refresh & Decay state
+  const [proposals, setProposals] = useState<RefreshProposal[]>([]);
+  const [showProposals, setShowProposals] = useState(false);
+  const [scanningDecay, setScanningDecay] = useState(false);
+
+  const loadProposals = async (cid: string) => {
+    try {
+      const list = await refreshApi.listProposals(cid, "pending");
+      setProposals(list);
+    } catch {
+      // non-fatal
+    }
+  };
 
   const loadPipeline = async (cid: string) => {
     try {
@@ -59,6 +75,7 @@ export default function PipelinePage() {
     getDefaultClientId()
       .then((cid) => {
         setClientId(cid);
+        void loadProposals(cid);
         return loadPipeline(cid);
       })
       .catch((err) => {
@@ -66,6 +83,40 @@ export default function PipelinePage() {
         setLoading(false);
       });
   }, []);
+
+  const handleScanDecay = async () => {
+    if (!clientId) return;
+    try {
+      setScanningDecay(true);
+      setError(null);
+      const res = await refreshApi.scan(clientId);
+      setNotice(
+        `Decay scan complete: ${res.scanned} scanned, ${res.decayed_found} decayed items detected, ${res.proposals_created} refresh proposals created.`
+      );
+      await loadProposals(clientId);
+      await loadPipeline(clientId);
+      if (res.proposals_created > 0) setShowProposals(true);
+    } catch (err: any) {
+      setError(err?.message || "Decay scan failed");
+    } finally {
+      setScanningDecay(false);
+    }
+  };
+
+  const handleDecideProposal = async (proposalId: string, decision: "approved" | "rejected") => {
+    if (!clientId) return;
+    try {
+      setActionLoading(`prop-${proposalId}`);
+      await refreshApi.decideProposal(clientId, proposalId, decision);
+      setNotice(`Refresh proposal ${decision === "approved" ? "approved & queued for publishing" : "rejected"}.`);
+      await loadProposals(clientId);
+      await loadPipeline(clientId);
+    } catch (err: any) {
+      setError(err?.message || "Proposal decision failed");
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   const handleGenerateBrief = async (gapId: string) => {
     if (!clientId) return;
@@ -173,14 +224,35 @@ export default function PipelinePage() {
 
         <div className="flex items-center gap-2">
           {clientId && (
-            <button
-              onClick={() => loadPipeline(clientId)}
-              disabled={loading}
-              className="inline-flex items-center px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 transition shadow-sm disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${loading ? "animate-spin text-slate-400" : "text-slate-600"}`} />
-              Refresh
-            </button>
+            <>
+              <button
+                onClick={handleScanDecay}
+                disabled={scanningDecay}
+                className="inline-flex items-center px-3 py-1.5 border border-purple-200 rounded-lg text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 transition shadow-2xs disabled:opacity-50"
+              >
+                <Sparkles className={`w-3.5 h-3.5 mr-1.5 ${scanningDecay ? "animate-spin text-purple-500" : "text-purple-600"}`} />
+                {scanningDecay ? "Scanning…" : "Scan Decay"}
+              </button>
+
+              {proposals.length > 0 && (
+                <button
+                  onClick={() => setShowProposals(true)}
+                  className="inline-flex items-center px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-semibold hover:bg-amber-600 transition shadow-2xs animate-pulse"
+                >
+                  <Zap className="w-3.5 h-3.5 mr-1" />
+                  Refresh Proposals ({proposals.length})
+                </button>
+              )}
+
+              <button
+                onClick={() => loadPipeline(clientId)}
+                disabled={loading}
+                className="inline-flex items-center px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 transition shadow-sm disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${loading ? "animate-spin text-slate-400" : "text-slate-600"}`} />
+                Refresh
+              </button>
+            </>
           )}
           <button
             onClick={() => setShowNewBrief(true)}
@@ -339,6 +411,92 @@ export default function PipelinePage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Refresh Proposals Modal */}
+      {showProposals && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-xl space-y-4 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Zap className="w-5 h-5 text-amber-500" />
+                <h3 className="font-semibold text-slate-900">Content Refresh Proposals</h3>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 font-medium">
+                  {proposals.length} Pending
+                </span>
+              </div>
+              <button onClick={() => setShowProposals(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500">
+              The Refresh Engine monitors published content against daily LLM runs. When mention rates decay or new competitor citations emerge, diffs are generated for editor approval.
+            </p>
+
+            {proposals.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-xs">
+                No pending refresh proposals. All published content items are maintaining target visibility.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {proposals.map((p) => {
+                  const isProcessing = actionLoading === `prop-${p.id}`;
+                  return (
+                    <div
+                      key={p.id}
+                      className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-3"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="text-xs font-semibold text-slate-900">
+                            {p.item_title || p.slug || "Published Item"}
+                          </span>
+                          {p.decay_score != null && (
+                            <span className="ml-2 text-[10px] px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 font-medium">
+                              Decay Score: {Number(p.decay_score).toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[11px] text-slate-400">
+                          {p.created_at ? new Date(p.created_at).toLocaleDateString() : "Recent"}
+                        </span>
+                      </div>
+
+                      {p.diff_summary && (
+                        <div className="bg-white p-3 rounded-lg border border-slate-200 text-xs font-mono text-slate-700 whitespace-pre-wrap max-h-36 overflow-y-auto">
+                          {p.diff_summary}
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                        <button
+                          onClick={() => handleDecideProposal(p.id, "rejected")}
+                          disabled={isProcessing}
+                          className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-200 rounded-lg font-medium transition"
+                        >
+                          Reject
+                        </button>
+                        <button
+                          onClick={() => handleDecideProposal(p.id, "approved")}
+                          disabled={isProcessing}
+                          className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5 shadow-2xs"
+                        >
+                          {isProcessing ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Check className="w-3.5 h-3.5" />
+                          )}
+                          <span>Approve Diff & Republish</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
