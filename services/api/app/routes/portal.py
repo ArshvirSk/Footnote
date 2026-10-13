@@ -376,7 +376,7 @@ async def list_portal_approvals(
     user: Annotated[AuthUser, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     client_id: UUID | None = None,
-    status_filter: str | None = Query(None, alias="status"),
+    status_filter: Annotated[str | None, Query(alias="status")] = None,
 ) -> list[PortalApprovalItem]:
     """Pending content, briefs, memos, and outreach proposals awaiting client review."""
     eff_cid, _ = await _resolve_portal_access(user, client_id, db)
@@ -384,7 +384,7 @@ async def list_portal_approvals(
     where_clauses = ["ap.client_id = :cid"]
     params: dict[str, Any] = {"cid": str(eff_cid)}
 
-    if status_filter:
+    if status_filter and isinstance(status_filter, str):
         where_clauses.append("ap.status = CAST(:st AS approval_status_t)")
         params["st"] = status_filter
 
@@ -542,7 +542,7 @@ async def decide_portal_approval(
     await db.commit()
 
     # Re-fetch updated item
-    updated_items = await list_portal_approvals(user, db, client_id=ap_row.client_id)
+    updated_items = await list_portal_approvals(user, db, client_id=ap_row.client_id, status_filter=None)
     match = next((item for item in updated_items if item.id == approval_id), None)
     if not match:
         raise HTTPException(status_code=500, detail="Failed to reload approval item")
@@ -554,7 +554,7 @@ async def list_portal_content(
     user: Annotated[AuthUser, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     client_id: UUID | None = None,
-    status_filter: str | None = Query(None, alias="status"),
+    status_filter: Annotated[str | None, Query(alias="status")] = None,
 ) -> list[PortalContentItem]:
     """Inventory of published, scheduled, and drafted content for the client."""
     eff_cid, _ = await _resolve_portal_access(user, client_id, db)
@@ -562,7 +562,7 @@ async def list_portal_content(
     where_clauses = ["ci.client_id = :cid"]
     params: dict[str, Any] = {"cid": str(eff_cid)}
 
-    if status_filter:
+    if status_filter and isinstance(status_filter, str):
         where_clauses.append("ci.status = CAST(:st AS content_status_t)")
         params["st"] = status_filter
 
