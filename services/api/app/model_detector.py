@@ -50,12 +50,12 @@ async def get_model_release_events(
 ) -> list[dict[str, Any]]:
     """Retrieve recorded model release events sorted by detection time descending."""
     query = """
-        SELECT id, engine::text, model_label, detected_at, source_url
+        SELECT id, CAST(engine AS text) as engine, model_label, detected_at, source_url
         FROM model_release_events
     """
     params: dict[str, Any] = {"limit": limit}
     if engine:
-        query += " WHERE engine = :engine::engine_t"
+        query += " WHERE engine = CAST(:engine AS engine_t)"
         params["engine"] = engine
     query += " ORDER BY detected_at DESC LIMIT :limit"
 
@@ -84,7 +84,7 @@ async def detect_model_releases(
     # 1. Fetch currently recorded engine + model_label combinations
     existing_rows = (
         await db.execute(
-            text("SELECT engine::text, model_label FROM model_release_events")
+            text("SELECT CAST(engine AS text) as engine, model_label FROM model_release_events")
         )
     ).mappings().all()
     existing_set = {(r["engine"], r["model_label"]) for r in existing_rows}
@@ -106,7 +106,7 @@ async def detect_model_releases(
     observed_rows = (
         await db.execute(
             text("""
-                SELECT DISTINCT engine::text, model_label
+                SELECT DISTINCT CAST(engine AS text) as engine, model_label
                 FROM answers
                 WHERE model_label IS NOT NULL AND model_label <> ''
             """)
@@ -138,7 +138,7 @@ async def detect_model_releases(
             await db.execute(
                 text("""
                     INSERT INTO model_release_events (id, engine, model_label, detected_at, source_url)
-                    VALUES (:id, :engine::engine_t, :model_label, :detected_at, :source_url)
+                    VALUES (:id, CAST(:engine AS engine_t), :model_label, :detected_at, :source_url)
                 """),
                 {
                     "id": event_id,
@@ -177,15 +177,15 @@ async def rebaseline_prompts(
     params: dict[str, Any] = {"now": datetime.now(UTC)}
 
     if client_id:
-        clauses.append("client_id = :client_id")
+        clauses.append("client_id = CAST(:client_id AS uuid)")
         params["client_id"] = str(client_id)
 
     if engine:
-        clauses.append(":engine::engine_t = ANY(engines)")
+        clauses.append("CAST(:engine AS engine_t) = ANY(engines)")
         params["engine"] = engine
 
     if prompt_ids:
-        clauses.append("id = ANY(:prompt_ids)")
+        clauses.append("id = ANY(CAST(:prompt_ids AS uuid[]))")
         params["prompt_ids"] = [str(pid) for pid in prompt_ids]
 
     where_sql = " AND ".join(clauses)
@@ -229,7 +229,7 @@ async def get_model_drift_summary(
     latest_event = (
         await db.execute(
             text("""
-                SELECT id, engine::text, model_label, detected_at, source_url
+                SELECT id, CAST(engine AS text) as engine, model_label, detected_at, source_url
                 FROM model_release_events
                 ORDER BY detected_at DESC
                 LIMIT 1

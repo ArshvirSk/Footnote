@@ -1044,7 +1044,7 @@ async def rebaseline_for_release(
     """Trigger re-baselining specifically for the engine associated with a detected release event."""
     event_row = (
         await db.execute(
-            text("SELECT id, engine::text, model_label FROM model_release_events WHERE id = :id"),
+            text("SELECT id, CAST(engine AS text) as engine, model_label FROM model_release_events WHERE id = CAST(:id AS uuid)"),
             {"id": str(release_id)},
         )
     ).mappings().first()
