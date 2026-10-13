@@ -8,40 +8,41 @@ import {
   Clock,
   ExternalLink,
   FileText,
-  Filter,
   Loader2,
+  Lock,
   MessageSquare,
   RefreshCw,
   ShieldCheck,
   X,
 } from "lucide-react";
 import {
-  ApprovalItem,
-  contentApi,
-  getDefaultClientId,
+  PortalApprovalItem,
+  portalApi,
+  getSelectedClientId,
 } from "@/lib/api";
 
 export default function ClientApprovalsPage() {
   const [clientId, setClientId] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string>("client_approver");
   const [loading, setLoading] = useState(true);
-  const [items, setItems] = useState<ApprovalItem[]>([]);
+  const [items, setItems] = useState<PortalApprovalItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  // Tab: pending vs decided
+  // Tab: pending vs all
   const [tab, setTab] = useState<"pending" | "all">("pending");
 
   // Review modal
-  const [selectedItem, setSelectedItem] = useState<ApprovalItem | null>(null);
-  const [decisionAction, setDecisionAction] = useState<"approve" | "reject" | "request_changes">("approve");
+  const [selectedItem, setSelectedItem] = useState<PortalApprovalItem | null>(null);
+  const [decisionAction, setDecisionAction] = useState<"approved" | "rejected" | "changes_requested">("approved");
   const [comment, setComment] = useState("");
 
-  const loadApprovals = async (cid: string) => {
+  const loadApprovals = async (cid?: string) => {
     try {
       setLoading(true);
       setError(null);
-      const data = await contentApi.listApprovals(cid);
+      const data = await portalApi.listApprovals(cid);
       setItems(data);
     } catch (err: any) {
       setError(err?.message || "Failed to load approval items");
@@ -51,26 +52,38 @@ export default function ClientApprovalsPage() {
   };
 
   useEffect(() => {
-    getDefaultClientId()
-      .then((cid) => {
-        setClientId(cid);
-        return loadApprovals(cid);
+    const activeCid = getSelectedClientId() || undefined;
+    portalApi.getMe(activeCid)
+      .then((me) => {
+        setUserRole(me.role);
+        const resolvedCid = me.active_client_id || undefined;
+        setClientId(resolvedCid || null);
+        return loadApprovals(resolvedCid);
       })
       .catch((err) => {
-        setError(err.message || "Failed to load client profile");
+        setError(err.message || "Failed to load client credentials");
         setLoading(false);
       });
   }, []);
 
-  const handleAction = async (item: ApprovalItem, action: "approve" | "reject" | "request_changes", customComment?: string) => {
-    if (!clientId) return;
+  const isViewer = userRole === "client_viewer";
+
+  const handleAction = async (
+    item: PortalApprovalItem,
+    action: "approved" | "rejected" | "changes_requested",
+    customComment?: string
+  ) => {
+    if (isViewer) {
+      setError("Client viewers have read-only access and cannot decide approvals");
+      return;
+    }
     try {
       setActionLoading(item.id);
-      await contentApi.actionApproval(clientId, item.id, action, customComment);
+      await portalApi.decideApproval(item.id, action, customComment);
       setNotice(`Decision submitted: ${action.replace("_", " ")}`);
       setSelectedItem(null);
       setComment("");
-      await loadApprovals(clientId);
+      await loadApprovals(clientId || undefined);
     } catch (err: any) {
       setError(err?.message || "Failed to submit approval decision");
     } finally {
@@ -99,21 +112,29 @@ export default function ClientApprovalsPage() {
             )}
           </div>
           <p className="text-sm text-slate-500 mt-0.5">
-            Strict human verification gate. Nothing is published to search engines or AI crawlers without your signoff.
+            Strict human verification gate. Nothing is published to search engines or AI crawlers without signoff.
           </p>
         </div>
 
-        {clientId && (
-          <button
-            onClick={() => loadApprovals(clientId)}
-            disabled={loading}
-            className="inline-flex items-center px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 transition shadow-2xs disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${loading ? "animate-spin text-slate-400" : "text-slate-600"}`} />
-            Refresh
-          </button>
-        )}
+        <button
+          onClick={() => loadApprovals(clientId || undefined)}
+          disabled={loading}
+          className="inline-flex items-center px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 transition shadow-2xs disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${loading ? "animate-spin text-slate-400" : "text-slate-600"}`} />
+          Refresh
+        </button>
       </div>
+
+      {/* Read-Only Banner for client_viewer */}
+      {isViewer && (
+        <div className="bg-slate-100 border border-slate-200 text-slate-700 px-4 py-3 rounded-xl text-xs flex items-center gap-2.5">
+          <Lock className="w-4 h-4 text-slate-500 flex-shrink-0" />
+          <span>
+            <strong>Read-only Access:</strong> You are signed in with the <em>Client Viewer</em> role. You can review proposed content, but approval and rejection rights require an authorized <em>Client Approver</em>.
+          </span>
+        </div>
+      )}
 
       {/* Notices */}
       {notice && (
@@ -194,6 +215,8 @@ export default function ClientApprovalsPage() {
                     className={`p-2.5 rounded-xl flex-shrink-0 ${
                       item.subject_type === "brief"
                         ? "bg-blue-50 text-blue-600"
+                        : item.subject_type === "memo"
+                        ? "bg-emerald-50 text-emerald-600"
                         : "bg-purple-50 text-purple-600"
                     }`}
                   >
@@ -236,6 +259,12 @@ export default function ClientApprovalsPage() {
                       </p>
                     )}
 
+                    {item.preview.excerpt && (
+                      <p className="text-xs text-slate-600 mt-2 bg-slate-50 p-2.5 rounded-lg border border-slate-100 leading-relaxed font-sans">
+                        &ldquo;{item.preview.excerpt}&rdquo;
+                      </p>
+                    )}
+
                     {item.comment && (
                       <div className="mt-2 text-xs bg-slate-50 border border-slate-200/80 rounded-lg p-2 text-slate-600">
                         <strong>Reviewer note:</strong> {item.comment}
@@ -250,18 +279,20 @@ export default function ClientApprovalsPage() {
                     <button
                       onClick={() => {
                         setSelectedItem(item);
-                        setDecisionAction("request_changes");
+                        setDecisionAction("changes_requested");
                       }}
-                      disabled={isActing}
-                      className="inline-flex items-center px-3.5 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition text-xs font-medium"
+                      disabled={isActing || isViewer}
+                      title={isViewer ? "Viewer mode is read-only" : undefined}
+                      className="inline-flex items-center px-3.5 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition text-xs font-medium disabled:opacity-50"
                     >
                       <MessageSquare className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
                       Feedback
                     </button>
 
                     <button
-                      onClick={() => handleAction(item, "approve", "Approved via client portal")}
-                      disabled={isActing}
+                      onClick={() => handleAction(item, "approved", "Approved via client portal")}
+                      disabled={isActing || isViewer}
+                      title={isViewer ? "Viewer mode is read-only" : undefined}
                       className="inline-flex items-center px-4 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition text-xs font-medium shadow-2xs disabled:opacity-50"
                     >
                       {isActing ? (
@@ -285,7 +316,7 @@ export default function ClientApprovalsPage() {
           <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
               <div>
-                <h3 className="text-base font-bold text-slate-900">Review & Feedback</h3>
+                <h3 className="text-base font-bold text-slate-900">Review &amp; Feedback</h3>
                 <p className="text-xs text-slate-500 truncate max-w-xs">{selectedItem.title}</p>
               </div>
               <button
@@ -302,9 +333,9 @@ export default function ClientApprovalsPage() {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => setDecisionAction("request_changes")}
+                    onClick={() => setDecisionAction("changes_requested")}
                     className={`py-2 px-3 rounded-lg text-xs font-medium border flex items-center justify-center gap-1 transition ${
-                      decisionAction === "request_changes"
+                      decisionAction === "changes_requested"
                         ? "bg-amber-600 text-white border-amber-600"
                         : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
                     }`}
@@ -313,9 +344,9 @@ export default function ClientApprovalsPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setDecisionAction("reject")}
+                    onClick={() => setDecisionAction("rejected")}
                     className={`py-2 px-3 rounded-lg text-xs font-medium border flex items-center justify-center gap-1 transition ${
-                      decisionAction === "reject"
+                      decisionAction === "rejected"
                         ? "bg-rose-600 text-white border-rose-600"
                         : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
                     }`}

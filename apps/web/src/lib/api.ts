@@ -1136,3 +1136,217 @@ export async function getDefaultClientId(): Promise<string> {
   setSelectedClientId(list[0].id);
   return list[0].id;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Milestone 7: Client Portal & Admin Typed APIs
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface PortalMe {
+  user_id: string;
+  email: string;
+  role: string;
+  active_client_id: string | null;
+  active_client_name: string | null;
+  is_preview: boolean;
+  clients: {
+    id: string;
+    name: string;
+    primary_domain: string;
+    industry: string | null;
+    status: string;
+  }[];
+}
+
+export interface PortalRecentMention {
+  engine: string;
+  query_text: string;
+  snippet: string;
+  collected_at: string | null;
+}
+
+export interface PortalDashboard {
+  client_id: string;
+  client_name: string;
+  primary_domain: string;
+  visibility_pct: number;
+  citation_share_pct: number;
+  content_shipped: number;
+  pending_actions: number;
+  recent_mentions: PortalRecentMention[];
+}
+
+export interface PortalApprovalItem {
+  id: string;
+  subject_type: string;
+  subject_id: string;
+  status: string;
+  title: string;
+  subtitle: string | null;
+  requested_at: string;
+  comment: string | null;
+  preview: {
+    excerpt?: string | null;
+    word_count?: number | null;
+    angle?: string | null;
+    url?: string | null;
+    diff_summary?: string | null;
+  };
+}
+
+export interface PortalContentItem {
+  id: string;
+  slug: string | null;
+  type: string;
+  status: string;
+  title: string;
+  word_count: number;
+  published_url: string | null;
+  published_at: string | null;
+  created_at: string;
+}
+
+export interface PortalSettings {
+  client_id: string;
+  name: string;
+  primary_domain: string;
+  industry: string | null;
+  status: string;
+  voice: string | null;
+  positioning: string | null;
+  products_count: number;
+  proof_points_count: number;
+  banned_claims_count: number;
+  publish_targets: { kind: string; status: string }[];
+  competitor_domains: string[];
+}
+
+export const portalApi = {
+  getMe: (clientId?: string) =>
+    api.get<PortalMe>(`/portal/me${clientId ? `?client_id=${clientId}` : ""}`),
+  getDashboard: (clientId?: string) =>
+    api.get<PortalDashboard>(`/portal/dashboard${clientId ? `?client_id=${clientId}` : ""}`),
+  listApprovals: (clientId?: string, status?: string) => {
+    const params = new URLSearchParams();
+    if (clientId) params.set("client_id", clientId);
+    if (status) params.set("status", status);
+    const qs = params.toString();
+    return api.get<PortalApprovalItem[]>(`/portal/approvals${qs ? `?${qs}` : ""}`);
+  },
+  decideApproval: (
+    approvalId: string,
+    decision: "approved" | "rejected" | "changes_requested",
+    comment?: string
+  ) =>
+    api.post<PortalApprovalItem>(`/portal/approvals/${approvalId}/decide`, {
+      decision,
+      comment,
+    }),
+  listContent: (clientId?: string, status?: string) => {
+    const params = new URLSearchParams();
+    if (clientId) params.set("client_id", clientId);
+    if (status) params.set("status", status);
+    const qs = params.toString();
+    return api.get<PortalContentItem[]>(`/portal/content${qs ? `?${qs}` : ""}`);
+  },
+  getSettings: (clientId?: string) =>
+    api.get<PortalSettings>(`/portal/settings${clientId ? `?client_id=${clientId}` : ""}`),
+};
+
+export interface AdminUser {
+  user_id: string;
+  email: string;
+  role: string;
+  org_id: string | null;
+  client_ids: string[];
+  clients: { id: string; name: string }[];
+  created_at: string | null;
+}
+
+export interface AuditLogItem {
+  id: number;
+  org_id: string | null;
+  actor: string | null;
+  actor_email: string | null;
+  action: string;
+  entity: string;
+  entity_id: string | null;
+  meta: Record<string, any>;
+  at: string;
+}
+
+export interface AuditLogResponse {
+  items: AuditLogItem[];
+  total: number;
+}
+
+export interface AgentRunItem {
+  id: string;
+  client_id: string | null;
+  client_name: string | null;
+  agent: string;
+  model: string | null;
+  tokens_in: number | null;
+  tokens_out: number | null;
+  cost_usd: number | null;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+  trace_url: string | null;
+}
+
+export interface AdminSpendResponse {
+  total_spend_usd: number;
+  spend_30d_usd: number;
+  total_tokens_in: number;
+  total_tokens_out: number;
+  total_runs: number;
+  by_agent: { agent: string; runs: number; spend_usd: number; tokens: number }[];
+  by_model: { model: string; runs: number; spend_usd: number }[];
+  by_client: { client_id: string; client_name: string; runs: number; spend_usd: number }[];
+}
+
+export interface EngineStatusItem {
+  engine: string;
+  configured: boolean;
+  model: string;
+  key_preview: string;
+}
+
+export const adminApi = {
+  listUsers: () => api.get<AdminUser[]>("/admin/users"),
+  createUser: (data: { email: string; role: string; client_ids?: string[]; org_id?: string }) =>
+    api.post<AdminUser>("/admin/users", data),
+  updateUser: (userId: string, data: { role?: string; client_ids?: string[] }) =>
+    api.patch<AdminUser>(`/admin/users/${userId}`, data),
+  deleteUser: (userId: string) => api.delete<{ status: string; user_id: string }>(`/admin/users/${userId}`),
+  listAuditLogs: (params?: { actor?: string; action?: string; entity?: string; limit?: number; offset?: number }) => {
+    const p = new URLSearchParams();
+    if (params?.actor) p.set("actor", params.actor);
+    if (params?.action) p.set("action", params.action);
+    if (params?.entity) p.set("entity", params.entity);
+    if (params?.limit) p.set("limit", String(params.limit));
+    if (params?.offset) p.set("offset", String(params.offset));
+    const qs = p.toString();
+    return api.get<AuditLogResponse>(`/admin/audit-logs${qs ? `?${qs}` : ""}`);
+  },
+  listAgentRuns: (params?: { client_id?: string; agent?: string; status?: string; limit?: number; offset?: number }) => {
+    const p = new URLSearchParams();
+    if (params?.client_id) p.set("client_id", params.client_id);
+    if (params?.agent) p.set("agent", params.agent);
+    if (params?.status) p.set("status", params.status);
+    if (params?.limit) p.set("limit", String(params.limit));
+    if (params?.offset) p.set("offset", String(params.offset));
+    const qs = p.toString();
+    return api.get<AgentRunItem[]>(`/admin/agent-runs${qs ? `?${qs}` : ""}`);
+  },
+  getSpend: () => api.get<AdminSpendResponse>("/admin/spend"),
+  getEngineStatus: () => api.get<EngineStatusItem[]>("/admin/engine-status"),
+  triggerReparse: (clientId?: string, engine?: string) =>
+    api.post<{ status: string; count: number }>("/admin/reparse", { client_id: clientId, engine }),
+  updateBillingLimits: (
+    clientId: string,
+    limits: { max_prompts?: number; max_monthly_spend_usd?: number; max_runs_per_day?: number }
+  ) =>
+    api.patch<{ client_id: string; billing_limits: any }>(`/admin/clients/${clientId}/billing-limits`, limits),
+};
+

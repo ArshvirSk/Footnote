@@ -3,15 +3,19 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const NAV_ITEMS = [
-  { href: "/portal", label: "Overview" },
-  { href: "/portal/approvals", label: "Approvals", badge: 2 },
-  { href: "/portal/content", label: "Shipped Content" },
-  { href: "/portal/settings", label: "Settings" },
-];
+interface PortalNavProps {
+  pendingCount?: number;
+}
 
-export default function PortalNav() {
+export default function PortalNav({ pendingCount = 0 }: PortalNavProps) {
   const pathname = usePathname();
+
+  const NAV_ITEMS = [
+    { href: "/portal", label: "Overview" },
+    { href: "/portal/approvals", label: "Approvals", badge: pendingCount > 0 ? pendingCount : undefined },
+    { href: "/portal/content", label: "Shipped Content" },
+    { href: "/portal/settings", label: "Settings" },
+  ];
 
   return (
     <nav className="ml-8 flex space-x-6 text-sm font-medium">
@@ -31,7 +35,7 @@ export default function PortalNav() {
           >
             {item.label}
             {item.badge !== undefined && (
-              <span className="ml-1 bg-blue-100 text-blue-700 py-0.5 px-2 rounded-full text-xs">
+              <span className="ml-1.5 bg-amber-100 text-amber-800 font-bold py-0.5 px-2 rounded-full text-xs">
                 {item.badge}
               </span>
             )}
@@ -41,3 +45,4 @@ export default function PortalNav() {
     </nav>
   );
 }
+
