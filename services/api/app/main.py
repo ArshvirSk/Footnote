@@ -24,6 +24,7 @@ from services.api.app.routes import (
     integrations,
     memos,
     outreach,
+    portal,
     prompts,
     publishing,
     refresh,
@@ -76,6 +77,7 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
+app.include_router(portal.router, prefix="/api/v1")
 app.include_router(clients.router, prefix="/api/v1")
 app.include_router(prompts.router, prefix="/api/v1")
 app.include_router(collection.router, prefix="/api/v1")
