@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, Clock, Eye, FileText, Loader2, MessageSquare, Quote, ShieldAlert, Sparkles } from "lucide-react";
-import { PortalDashboard, portalApi, getSelectedClientId } from "@/lib/api";
+import { ArrowRight, CheckCircle2, Clock, Eye, FileDown, FileText, Loader2, MessageSquare, Quote, ShieldAlert, Sparkles } from "lucide-react";
+import { PortalDashboard, portalApi, reportsApi, getSelectedClientId } from "@/lib/api";
 
 export default function PortalOverview() {
   const [dashboard, setDashboard] = useState<PortalDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     const cid = getSelectedClientId() || undefined;
@@ -17,6 +18,22 @@ export default function PortalOverview() {
       .catch((err) => setError(err.message || "Failed to load dashboard"))
       .finally(() => setLoading(false));
   }, []);
+
+  const handleExportReport = async () => {
+    if (!dashboard) return;
+    try {
+      setExporting(true);
+      const rep = await reportsApi.generate(dashboard.client_id, {
+        title: `Executive Visibility Dossier — ${dashboard.client_name}`,
+        report_type: "visibility_audit",
+      });
+      window.open(reportsApi.exportUrl(rep.id, "html"), "_blank");
+    } catch (err: any) {
+      alert(err?.message || "Failed to generate executive report");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -41,22 +58,37 @@ export default function PortalOverview() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      <div>
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-            {dashboard.primary_domain}
-          </span>
-          <span className="w-1 h-1 bg-slate-300 rounded-full" />
-          <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
-            <CheckCircle2 className="w-3 h-3" /> Live Telemetry
-          </span>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+              {dashboard.primary_domain}
+            </span>
+            <span className="w-1 h-1 bg-slate-300 rounded-full" />
+            <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3" /> Live Telemetry
+            </span>
+          </div>
+          <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+            {dashboard.client_name} Overview
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Verified presence, brand citations, and live quotes across frontier AI answer engines.
+          </p>
         </div>
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900">
-          {dashboard.client_name} Overview
-        </h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Verified presence, brand citations, and live quotes across frontier AI answer engines.
-        </p>
+
+        <button
+          onClick={handleExportReport}
+          disabled={exporting}
+          className="inline-flex items-center px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold shadow-2xs transition disabled:opacity-50 self-start sm:self-auto"
+        >
+          {exporting ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
+          ) : (
+            <FileDown className="w-3.5 h-3.5 mr-1.5" />
+          )}
+          Export Executive Dossier
+        </button>
       </div>
 
       {/* KPI Cards */}

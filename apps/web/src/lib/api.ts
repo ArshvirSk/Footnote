@@ -1412,3 +1412,22 @@ export interface MaintenancePruneResponse {
   retention_cutoffs: Record<string, string>;
 }
 
+export interface ExecutiveReportItem {
+  id: string;
+  client_id: string;
+  title: string;
+  report_type: string;
+  metrics_summary: Record<string, any>;
+  storage_url?: string;
+  created_at?: string;
+}
+
+export const reportsApi = {
+  generate: (clientId: string, data?: { title?: string; report_type?: string }) =>
+    api.post<ExecutiveReportItem>(`/reports/${clientId}/generate`, data ?? {}),
+  list: (clientId: string) =>
+    api.get<ExecutiveReportItem[]>(`/reports/${clientId}`),
+  exportUrl: (reportId: string, format: "html" | "json" = "html") =>
+    `/api/v1/reports/${reportId}/export?format=${format}`,
+};
+

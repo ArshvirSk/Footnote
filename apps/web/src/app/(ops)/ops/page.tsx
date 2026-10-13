@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, Info } from "lucide-react";
+import { ArrowRight, CheckCircle2, FileDown, Info, Loader2 } from "lucide-react";
 import {
   CLIENT_CHANGED_EVENT,
   getSelectedClientId,
   setSelectedClientId,
   websites,
+  reportsApi,
   type ClientSummary,
   type WebsiteDashboard,
 } from "../../../lib/api";
@@ -22,6 +23,7 @@ export default function OpsDashboard() {
   const [dashboard, setDashboard] = useState<WebsiteDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const loadDashboard = useCallback(async (clientId: string) => {
     try {
@@ -98,6 +100,22 @@ export default function OpsDashboard() {
   const client = list.find((c) => c.id === selected) ?? null;
   const kpis = dashboard?.kpis;
 
+  const handleExportDossier = async () => {
+    if (!client) return;
+    try {
+      setExporting(true);
+      const rep = await reportsApi.generate(client.id, {
+        title: `Executive Visibility Dossier — ${client.name}`,
+        report_type: "visibility_audit",
+      });
+      window.open(reportsApi.exportUrl(rep.id, "html"), "_blank");
+    } catch (err: any) {
+      alert(err?.message || "Failed to generate executive report");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-6xl">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -108,15 +126,30 @@ export default function OpsDashboard() {
           </p>
         </div>
         {client && (
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-500">Viewing</span>
-            <Link href={`/ops/websites/${client.id}`} className="font-medium text-slate-900 hover:underline">
-              {client.name}
-            </Link>
-            <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${statusBadgeClass(client.derived_status)}`}>
-              {statusLabel(client.derived_status)}
-            </span>
-            {client.is_demo && <DemoBadge />}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-slate-500">Viewing</span>
+              <Link href={`/ops/websites/${client.id}`} className="font-medium text-slate-900 hover:underline">
+                {client.name}
+              </Link>
+              <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${statusBadgeClass(client.derived_status)}`}>
+                {statusLabel(client.derived_status)}
+              </span>
+              {client.is_demo && <DemoBadge />}
+            </div>
+
+            <button
+              onClick={handleExportDossier}
+              disabled={exporting}
+              className="inline-flex items-center px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold shadow-2xs transition disabled:opacity-50"
+            >
+              {exporting ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
+              ) : (
+                <FileDown className="w-3.5 h-3.5 mr-1.5" />
+              )}
+              Export Dossier
+            </button>
           </div>
         )}
       </div>
