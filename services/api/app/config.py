@@ -71,6 +71,15 @@ class Settings(BaseSettings):
     # Sentry (optional)
     sentry_dsn: str = ""
 
+    # Object Storage (S3 / Neon Object Storage / Cloudflare R2 / Local fallback)
+    storage_provider: str = "s3"
+    storage_bucket: str = "footnote-artifacts"
+    storage_endpoint_url: str = ""
+    storage_access_key: str = ""
+    storage_secret_key: str = ""
+    storage_region: str = "us-east-1"
+    storage_public_url_prefix: str = ""
+
     model_config = {"env_file": ".env", "case_sensitive": False}
 
     @model_validator(mode="after")
