@@ -821,3 +821,8 @@ def _all_locs(sitemap_text: str) -> list[str]:
 def _page_urls(sitemap_text: str) -> list[str]:
     """Page URLs from a sitemap (skips child sitemaps and non-HTML assets)."""
     return [u for u in _all_locs(sitemap_text) if u.startswith("http") and _looks_like_html(u)]
+
+
+# Re-export audit trail helper for unified access
+from services.api.app.audit_trail import record_audit_event  # noqa: E402
+

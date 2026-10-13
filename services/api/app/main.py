@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from services.api.app.config import settings
 from services.api.app.logging import get_logger, setup_logging
 from services.api.app.routes import (
+    admin,
     analytics,
     audits,
     auth,
@@ -74,6 +75,7 @@ app.add_middleware(
 # Mount routes
 app.include_router(health.router)
 app.include_router(auth.router, prefix="/api/v1")
+app.include_router(admin.router, prefix="/api/v1")
 app.include_router(clients.router, prefix="/api/v1")
 app.include_router(prompts.router, prefix="/api/v1")
 app.include_router(collection.router, prefix="/api/v1")
