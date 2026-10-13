@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from services.api.app.config import settings
 from services.api.app.logging import get_logger, setup_logging
 from services.api.app.routes import (
+    analytics,
     audits,
     auth,
     billing,
@@ -84,3 +85,4 @@ app.include_router(audits.router, prefix="/api/v1")
 app.include_router(websites.router, prefix="/api/v1")
 app.include_router(brand.router, prefix="/api/v1")
 app.include_router(entities.router, prefix="/api/v1")
+app.include_router(analytics.router, prefix="/api/v1")
