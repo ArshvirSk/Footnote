@@ -23,6 +23,7 @@ from services.api.app.routes import (
     integrations,
     prompts,
     publishing,
+    refresh,
     research,
     tracking,
     websites,
@@ -86,3 +87,4 @@ app.include_router(websites.router, prefix="/api/v1")
 app.include_router(brand.router, prefix="/api/v1")
 app.include_router(entities.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
+app.include_router(refresh.router, prefix="/api/v1")
